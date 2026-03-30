@@ -58,11 +58,17 @@ type V4PacketBuilder interface {
 
 // V4PacketBuilderImpl implements the V4PacketBuilder interface.
 // It constructs V4 protocol packets with proper checkcode calculation.
-type V4PacketBuilderImpl struct{}
+type V4PacketBuilderImpl struct {
+	sessionManager          *LegacySessionManager
+	directConnectionEnabled func(version int) bool
+}
 
 // NewV4PacketBuilder creates a new V4PacketBuilder instance.
-func NewV4PacketBuilder() V4PacketBuilder {
-	return &V4PacketBuilderImpl{}
+func NewV4PacketBuilder(sessionManager *LegacySessionManager, directConnectionEnabled func(version int) bool) V4PacketBuilder {
+	return &V4PacketBuilderImpl{
+		sessionManager:          sessionManager,
+		directConnectionEnabled: directConnectionEnabled,
+	}
 }
 
 // CalculateCheckcode calculates the checkcode for server packets to V4 clients.
@@ -240,13 +246,32 @@ func (b *V4PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status 
 	// UIN of user who came online
 	binary.LittleEndian.PutUint32(pkt[offset:], uin)
 	offset += 4
-	// IP address (4 bytes, 0 for privacy)
+
+	// Look up connection info if direct connections enabled for V4
+	var externalIP, tcpPort, internalIP uint32
+	var dcType uint8
+	var dcVersion uint16
+	if b.directConnectionEnabled != nil && b.directConnectionEnabled(int(ICQLegacyVersionV4)) && b.sessionManager != nil {
+		if onlineSession := b.sessionManager.GetSession(uin); onlineSession != nil {
+			externalIP = onlineSession.GetExternalIP()
+			tcpPort = onlineSession.GetTCPPort()
+			internalIP = onlineSession.GetInternalIP()
+			dcType = onlineSession.DCType
+			dcVersion = onlineSession.GetDCVersion()
+		}
+	}
+
+	// IP address
+	binary.LittleEndian.PutUint32(pkt[offset:], externalIP)
 	offset += 4
-	// TCP port (4 bytes, 0 for privacy)
+	// TCP port
+	binary.LittleEndian.PutUint32(pkt[offset:], tcpPort)
 	offset += 4
-	// Internal/real IP (4 bytes, 0 for privacy)
+	// Internal/real IP
+	binary.LittleEndian.PutUint32(pkt[offset:], internalIP)
 	offset += 4
-	// DC type (1 byte)
+	// DC type
+	pkt[offset] = dcType
 	offset++
 	// Status (low 16 bits)
 	binary.LittleEndian.PutUint16(pkt[offset:], uint16(status&0xFFFF))
@@ -254,7 +279,8 @@ func (b *V4PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status 
 	// Extended status (high 16 bits)
 	binary.LittleEndian.PutUint16(pkt[offset:], uint16(status>>16))
 	offset += 2
-	// DC version (2 bytes)
+	// DC version
+	binary.LittleEndian.PutUint16(pkt[offset:], dcVersion)
 	offset += 2
 	// Unknown (2 bytes)
 	offset += 2

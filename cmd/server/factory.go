@@ -654,8 +654,8 @@ func ICQLegacy(deps Container) *icq_legacy.LegacyServer {
 
 	// Create handlers (sender will be set after server creation)
 	v2PacketBuilder := icq_legacy.NewV2PacketBuilder()
-	v3PacketBuilder := icq_legacy.NewV3PacketBuilder()
-	v4PacketBuilder := icq_legacy.NewV4PacketBuilder()
+	v3PacketBuilder := icq_legacy.NewV3PacketBuilder(sessionManager, deps.cfg.ICQLegacy.DirectConnectionEnabled)
+	v4PacketBuilder := icq_legacy.NewV4PacketBuilder(sessionManager, deps.cfg.ICQLegacy.DirectConnectionEnabled)
 	v5PacketBuilder := icq_legacy.NewV5PacketBuilder(sessionManager, deps.cfg.ICQLegacy.DirectConnectionEnabled)
 	v1Handler := icq_legacy.NewV1Handler(sessionManager, icqLegacyService, nil, logger)
 	v2Handler := icq_legacy.NewV2Handler(sessionManager, icqLegacyService, nil, v2PacketBuilder, logger)

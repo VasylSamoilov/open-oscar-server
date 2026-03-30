@@ -29,8 +29,8 @@ func newTestDispatcher(t *testing.T, sender PacketSender) *ProtocolDispatcher {
 
 	v1 := NewV1Handler(sessions, svc, sender, logger)
 	v2 := NewV2Handler(sessions, svc, sender, NewV2PacketBuilder(), logger)
-	v3 := NewV3Handler(sessions, svc, sender, NewV3PacketBuilder(), logger)
-	v4 := NewV4Handler(sessions, svc, sender, NewV4PacketBuilder(), logger)
+	v3 := NewV3Handler(sessions, svc, sender, NewV3PacketBuilder(sessions, nil), logger)
+	v4 := NewV4Handler(sessions, svc, sender, NewV4PacketBuilder(sessions, nil), logger)
 	v5 := NewV5Handler(sessions, svc, sender, NewV5PacketBuilder(sessions, nil), logger)
 
 	cfg := config.ICQLegacyConfig{

@@ -65,11 +65,17 @@ type V3PacketBuilder interface {
 
 // V3PacketBuilderImpl implements the V3PacketBuilder interface.
 // It constructs V3 protocol packets following the iserverd packet formats.
-type V3PacketBuilderImpl struct{}
+type V3PacketBuilderImpl struct {
+	sessionManager          *LegacySessionManager
+	directConnectionEnabled func(version int) bool
+}
 
 // NewV3PacketBuilder creates a new V3PacketBuilder instance.
-func NewV3PacketBuilder() V3PacketBuilder {
-	return &V3PacketBuilderImpl{}
+func NewV3PacketBuilder(sessionManager *LegacySessionManager, directConnectionEnabled func(version int) bool) V3PacketBuilder {
+	return &V3PacketBuilderImpl{
+		sessionManager:          sessionManager,
+		directConnectionEnabled: directConnectionEnabled,
+	}
 }
 
 // buildV3Header creates a standard V3 packet header (16 bytes).
@@ -221,20 +227,34 @@ func (b *V3PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status 
 	binary.LittleEndian.PutUint32(pkt[offset:], uin)
 	offset += 4
 
-	// IP address (0 for privacy - V3 clients crash on non-V3 client connect)
-	binary.LittleEndian.PutUint32(pkt[offset:], 0)
+	// Look up connection info if direct connections enabled for V3
+	var externalIP, tcpPort, internalIP uint32
+	var dcType uint8
+	var dcVersion uint16
+	if b.directConnectionEnabled != nil && b.directConnectionEnabled(int(ICQLegacyVersionV3)) && b.sessionManager != nil {
+		if onlineSession := b.sessionManager.GetSession(uin); onlineSession != nil {
+			externalIP = onlineSession.GetExternalIP()
+			tcpPort = onlineSession.GetTCPPort()
+			internalIP = onlineSession.GetInternalIP()
+			dcType = onlineSession.DCType
+			dcVersion = onlineSession.GetDCVersion()
+		}
+	}
+
+	// IP address
+	binary.LittleEndian.PutUint32(pkt[offset:], externalIP)
 	offset += 4
 
-	// TCP port (0 for privacy)
-	binary.LittleEndian.PutUint32(pkt[offset:], 0)
+	// TCP port
+	binary.LittleEndian.PutUint32(pkt[offset:], tcpPort)
 	offset += 4
 
-	// Internal IP (0 for privacy)
-	binary.LittleEndian.PutUint32(pkt[offset:], 0)
+	// Internal IP
+	binary.LittleEndian.PutUint32(pkt[offset:], internalIP)
 	offset += 4
 
-	// DC type (0)
-	pkt[offset] = 0
+	// DC type
+	pkt[offset] = dcType
 	offset++
 
 	// Status (low word)
@@ -246,7 +266,7 @@ func (b *V3PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status 
 	offset += 2
 
 	// DC version
-	binary.LittleEndian.PutUint16(pkt[offset:], 0)
+	binary.LittleEndian.PutUint16(pkt[offset:], dcVersion)
 	offset += 2
 
 	// Unknown
