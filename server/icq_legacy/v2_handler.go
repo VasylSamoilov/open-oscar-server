@@ -522,11 +522,13 @@ func (h *V2Handler) handleInfoReq(session *LegacySession, pkt *V2ClientPacket) e
 	}
 
 	// Skip SEQ prefix (2 bytes), read UIN at offset 2
+	infoSeq := binary.LittleEndian.Uint16(pkt.Data[0:2])
 	targetUIN := binary.LittleEndian.Uint32(pkt.Data[2:6])
 
 	h.logger.Debug("info request",
 		"from", session.UIN,
 		"target", targetUIN,
+		"info_seq", infoSeq,
 	)
 
 	// Get user info
@@ -537,6 +539,8 @@ func (h *V2Handler) handleInfoReq(session *LegacySession, pkt *V2ClientPacket) e
 	}
 
 	// Build and send SRV_INFO_REPLY (0x0118)
+	// The checkSequence in the data payload must echo the client's info sub-sequence
+	// so DoneExtendedEvent() can match the response to the pending request.
 	wireInfo := &LegacyUserInfo{
 		UIN:       info.UIN,
 		Nickname:  truncateField(info.Nickname, 20, h.logger, "nickname", info.UIN),
@@ -545,7 +549,7 @@ func (h *V2Handler) handleInfoReq(session *LegacySession, pkt *V2ClientPacket) e
 		Email:     truncateField(info.Email, 64, h.logger, "email", info.UIN),
 		Auth:      info.AuthRequired,
 	}
-	replyPkt := BuildV2InfoReply(session.NextServerSeqNum(), wireInfo)
+	replyPkt := BuildV2InfoReply(session.NextServerSeqNum(), infoSeq, wireInfo)
 	replyPkt.Version = session.Version
 	return h.sender.SendToSession(session, MarshalV2ServerPacket(replyPkt))
 }
@@ -608,12 +612,12 @@ func (h *V2Handler) handleExtInfoReq(session *LegacySession, addr *net.UDPAddr, 
 	}
 
 	if session != nil {
-		replyPkt := BuildV2ExtInfoReply(session.NextServerSeqNum(), wireInfo)
+		replyPkt := BuildV2ExtInfoReply(session.NextServerSeqNum(), seqPrefix, wireInfo)
 		replyPkt.Version = session.Version
 		return h.sender.SendToSession(session, MarshalV2ServerPacket(replyPkt))
 	}
 	// No session (first-login flow) — use seqPrefix as connection ID and send to addr
-	replyPkt := BuildV2ExtInfoReply(seqPrefix, wireInfo)
+	replyPkt := BuildV2ExtInfoReply(seqPrefix, seqPrefix, wireInfo)
 	return h.sender.SendPacket(addr, MarshalV2ServerPacket(replyPkt))
 }
 

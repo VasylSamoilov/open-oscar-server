@@ -743,10 +743,10 @@ func BuildV2SearchResult(seqNum uint16, user *LegacyUserInfo, isLast bool) *V2Se
 // V2 format (from center-1.10.7 icq_HandleInfoReply):
 // SEQ(2) + UIN(4) + NICK_LEN(2) + NICK + FIRST_LEN(2) + FIRST + LAST_LEN(2) + LAST + EMAIL_LEN(2) + EMAIL + AUTH(1)
 // Same payload format as search result, but uses command 0x0118
-func BuildV2InfoReply(seqNum uint16, user *LegacyUserInfo) *V2ServerPacket {
+func BuildV2InfoReply(serverSeq uint16, checkSeq uint16, user *LegacyUserInfo) *V2ServerPacket {
 	buf := new(bytes.Buffer)
-	// SEQ prefix - the client reads this first before UIN
-	binary.Write(buf, binary.LittleEndian, seqNum)
+	// checkSequence - echoes the client's info sub-sequence so DoneExtendedEvent can match
+	binary.Write(buf, binary.LittleEndian, checkSeq)
 	binary.Write(buf, binary.LittleEndian, user.UIN)
 	WriteLegacyString(buf, user.Nickname)
 	WriteLegacyString(buf, user.FirstName)
@@ -754,11 +754,14 @@ func BuildV2InfoReply(seqNum uint16, user *LegacyUserInfo) *V2ServerPacket {
 	WriteLegacyString(buf, user.Email)
 	// AUTH byte (0 = auth not required, 1 = auth required)
 	buf.WriteByte(user.Auth)
+	// Trailing padding (observed in licq example packets)
+	binary.Write(buf, binary.LittleEndian, uint16(0))
+	binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	return &V2ServerPacket{
 		Version: ICQLegacyVersionV2,
 		Command: ICQLegacySrvInfoReply,
-		SeqNum:  seqNum,
+		SeqNum:  serverSeq,
 		Data:    buf.Bytes(),
 	}
 }
@@ -767,10 +770,10 @@ func BuildV2InfoReply(seqNum uint16, user *LegacyUserInfo) *V2ServerPacket {
 // V2 format (from center-1.10.7 icq_HandleExtInfoReply):
 // SEQ(2) + UIN(4) + CITY_LEN(2) + CITY + COUNTRY(2) + COUNTRY_STAT(1) + STATE_LEN(2) + STATE +
 // AGE(2) + GENDER(1) + PHONE_LEN(2) + PHONE + HP_LEN(2) + HP + ABOUT_LEN(2) + ABOUT
-func BuildV2ExtInfoReply(seqNum uint16, user *LegacyUserInfo) *V2ServerPacket {
+func BuildV2ExtInfoReply(serverSeq uint16, checkSeq uint16, user *LegacyUserInfo) *V2ServerPacket {
 	buf := new(bytes.Buffer)
-	// SEQ prefix
-	binary.Write(buf, binary.LittleEndian, seqNum)
+	// checkSequence - echoes the client's info sub-sequence
+	binary.Write(buf, binary.LittleEndian, checkSeq)
 	// UIN
 	binary.Write(buf, binary.LittleEndian, user.UIN)
 	// City (length-prefixed string)
@@ -795,7 +798,7 @@ func BuildV2ExtInfoReply(seqNum uint16, user *LegacyUserInfo) *V2ServerPacket {
 	return &V2ServerPacket{
 		Version: ICQLegacyVersionV2,
 		Command: ICQLegacySrvExtInfoReply,
-		SeqNum:  seqNum,
+		SeqNum:  serverSeq,
 		Data:    buf.Bytes(),
 	}
 }
