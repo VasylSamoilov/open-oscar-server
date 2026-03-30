@@ -442,6 +442,8 @@ func ParseV2LoginPacket(data []byte) (*LegacyLoginPacket, error) {
 	pkt.Status = uint32(status)
 
 	// Read DC version (2 bytes) - m_nTcpVersion is unsigned short
+	// TODO: store dcVersion in LegacyLoginPacket so V2 handler can pass it
+	// to SetDirectConnectionInfo when direct connections are enabled for V2.
 	var dcVersion uint16
 	if err := binary.Read(r, binary.LittleEndian, &dcVersion); err != nil {
 		// Optional field

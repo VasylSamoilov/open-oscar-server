@@ -485,6 +485,9 @@ func (h *V4Handler) handleGetDeps(addr *net.UDPAddr, seq1, seq2 uint16, uin uint
 
 	// 4. Create session using dataUIN (the actual login UIN from the packet data),
 	// not the header UIN which may be 0 or stale from a previous session.
+	// TODO: parse and store direct connection info (IP, port, DC version, DC type)
+	// from the V4 login packet so that presence notifications can include real
+	// connection details when ICQ_LEGACY_DIRECT_CONNECTIONS includes V4.
 	newSession, err := h.sessions.CreateSession(dataUIN, addr, ICQLegacyVersionV4)
 	if err != nil {
 		h.logger.Error("failed to create V4 session", "err", err, "uin", dataUIN)
@@ -629,6 +632,7 @@ func (h *V4Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, seq1,
 	} else {
 		// Direct login flow: client sent Login (0x03E8) without prior
 		// GetDeps. Just create session and send login reply directly.
+		// TODO: parse and store direct connection info from V4 login packet.
 		newSession, err := h.sessions.CreateSession(uin, addr, ICQLegacyVersionV4)
 		if err != nil {
 			h.logger.Error("failed to create V4 session", "err", err, "uin", uin)

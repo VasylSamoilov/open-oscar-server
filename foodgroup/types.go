@@ -391,8 +391,4 @@ type UserManager interface {
 
 	// SetWarnLevel updates the last warn update time and warning level for a user.
 	SetWarnLevel(ctx context.Context, user state.IdentScreenName, lastWarnUpdate time.Time, lastWarnLevel uint16) error
-
-	// DeleteUser removes a user from the system by screen name.
-	// Returns state.ErrNoUser if the user does not exist.
-	DeleteUser(ctx context.Context, screenName state.IdentScreenName) error
 }

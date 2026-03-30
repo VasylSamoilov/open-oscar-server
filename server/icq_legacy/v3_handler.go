@@ -351,6 +351,9 @@ func (h *V3Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, seq1,
 	}
 
 	// 3. Create session (handler responsibility - session management)
+	// TODO: parse and store direct connection info (IP, port, DC version, DC type)
+	// from the V3 login packet so that presence notifications can include real
+	// connection details when ICQ_LEGACY_DIRECT_CONNECTIONS includes V3.
 	newSession, err := h.sessions.CreateSession(uin, addr, ICQLegacyVersionV3)
 	if err != nil {
 		h.logger.Error("failed to create session", "err", err, "uin", uin)
