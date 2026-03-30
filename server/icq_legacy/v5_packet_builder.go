@@ -2,8 +2,6 @@ package icq_legacy
 
 import (
 	"encoding/binary"
-
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V5PacketBuilder constructs V5 protocol packets (encrypted).
@@ -92,13 +90,15 @@ type V5PacketBuilder interface {
 // It constructs V5 protocol packets following the iserverd packet formats.
 type V5PacketBuilderImpl struct {
 	// sessionManager is used to look up online user connection info for peer-to-peer
-	sessionManager *LegacySessionManager
+	sessionManager          *LegacySessionManager
+	directConnectionEnabled func(version int) bool
 }
 
 // NewV5PacketBuilder creates a new V5PacketBuilder instance.
-func NewV5PacketBuilder(sessionManager *LegacySessionManager) V5PacketBuilder {
+func NewV5PacketBuilder(sessionManager *LegacySessionManager, directConnectionEnabled func(version int) bool) V5PacketBuilder {
 	return &V5PacketBuilderImpl{
-		sessionManager: sessionManager,
+		sessionManager:          sessionManager,
+		directConnectionEnabled: directConnectionEnabled,
 	}
 }
 
@@ -137,59 +137,59 @@ func (b *V5PacketBuilderImpl) BuildLoginReply(session *LegacySession, seq1, seq2
 	offset += 4
 	binary.LittleEndian.PutUint32(data[offset:], 0x80CDC19B) // server ID
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvHello,
+		Command:   ICQLegacySrvHello,
 		SeqNum1:   0,
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildBadPassword constructs a bad password response.
 func (b *V5PacketBuilderImpl) BuildBadPassword(sessionID uint32, uin uint32, seq2 uint16) []byte {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: sessionID,
-		Command:   wire.ICQLegacySrvWrongPasswd,
+		Command:   ICQLegacySrvWrongPasswd,
 		SeqNum1:   0,
 		SeqNum2:   seq2,
 		UIN:       uin,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildAck constructs an ACK packet.
 func (b *V5PacketBuilderImpl) BuildAck(session *LegacySession, seq1 uint16) []byte {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seq1,
 		SeqNum2:   0,
 		UIN:       session.UIN,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildAckWithSeq2 constructs an ACK echoing both seq1 and seq2 from the client.
 func (b *V5PacketBuilderImpl) BuildAckWithSeq2(session *LegacySession, seq1, seq2 uint16) []byte {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seq1,
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildUserOnline constructs a user online notification packet.
@@ -198,7 +198,7 @@ func (b *V5PacketBuilderImpl) BuildAckWithSeq2(session *LegacySession, seq1, seq
 // Verified against licq.5 client (icqd-udp.cpp ICQ_CMDxRCV_USERxONLINE):
 // Client reads: UIN(4) + IP(4) + PORT(2) + JUNK_SHORT(2) + REAL_IP(4) +
 //
-//	MODE(1) + STATUS(4) + TCP_VERSION(4)
+//	MODE(1) + STATUS(4) + DC_VERSION(4)
 //
 // Total client reads: 25 bytes. Extra bytes after that are ignored.
 //
@@ -209,7 +209,7 @@ func (b *V5PacketBuilderImpl) BuildAckWithSeq2(session *LegacySession, seq1, seq
 // - INT_IP(4): Internal/LAN IP (0 for V3)
 // - DC_TYPE(1): Direct connection type (0 for V3)
 // - STATUS(2)+ESTAT(2): Combined status - client reads as single uint32
-// - TCPVER(4): TCP protocol version
+// - DCVER(4): Direct connection protocol version
 // - DC_COOKIE(4): Direct connection cookie
 // - WEB_PORT(4): Web port
 // - CLI_FUTURES(4): Client futures/capabilities
@@ -234,15 +234,15 @@ func (b *V5PacketBuilderImpl) BuildUserOnline(session *LegacySession, uin uint32
 	// V5 clients get real connection info for peer-to-peer
 	var externalIP, tcpPort, internalIP uint32
 	var dcType uint8
-	var tcpVersion uint32
+	var dcVersion uint32
 
-	if onlineSession != nil && onlineSession.Version == wire.ICQLegacyVersionV5 {
+	if b.directConnectionEnabled != nil && b.directConnectionEnabled(int(ICQLegacyVersionV5)) && onlineSession != nil && onlineSession.Version == ICQLegacyVersionV5 {
 		// V5 client - send real connection info for peer-to-peer
 		externalIP = onlineSession.GetExternalIP()
 		tcpPort = onlineSession.GetTCPPort()
 		internalIP = onlineSession.GetInternalIP()
 		dcType = onlineSession.DCType
-		tcpVersion = uint32(onlineSession.GetTCPVersion())
+		dcVersion = uint32(onlineSession.GetDCVersion())
 	}
 	// else: V3/V4 clients or unknown - keep zeros for privacy
 
@@ -270,8 +270,8 @@ func (b *V5PacketBuilderImpl) BuildUserOnline(session *LegacySession, uin uint32
 	binary.LittleEndian.PutUint16(data[offset:], uint16(status>>16))
 	offset += 2
 
-	// TCP version
-	binary.LittleEndian.PutUint32(data[offset:], tcpVersion)
+	// DC version
+	binary.LittleEndian.PutUint32(data[offset:], dcVersion)
 	offset += 4
 
 	// DC cookie (not implemented)
@@ -297,17 +297,17 @@ func (b *V5PacketBuilderImpl) BuildUserOnline(session *LegacySession, uin uint32
 	// Status update time (not implemented)
 	binary.LittleEndian.PutUint32(data[offset:], 0)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserOnline,
+		Command:   ICQLegacySrvUserOnline,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildUserOffline constructs a user offline notification packet.
@@ -316,17 +316,17 @@ func (b *V5PacketBuilderImpl) BuildUserOffline(session *LegacySession, uin uint3
 	data := make([]byte, 4)
 	binary.LittleEndian.PutUint32(data[0:4], uin)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserOffline,
+		Command:   ICQLegacySrvUserOffline,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildUserStatus constructs a user status change notification packet.
@@ -337,31 +337,31 @@ func (b *V5PacketBuilderImpl) BuildUserStatus(session *LegacySession, uin uint32
 	binary.LittleEndian.PutUint16(data[4:6], uint16(status&0xFFFF))
 	binary.LittleEndian.PutUint16(data[6:8], uint16(status>>16))
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserStatus,
+		Command:   ICQLegacySrvUserStatus,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildContactListDone constructs a contact list processed response.
 func (b *V5PacketBuilderImpl) BuildContactListDone(session *LegacySession, seq2 uint16) []byte {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserListDone,
+		Command:   ICQLegacySrvUserListDone,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildOnlineMessage constructs an online system message packet.
@@ -391,17 +391,17 @@ func (b *V5PacketBuilderImpl) BuildOnlineMessage(session *LegacySession, fromUIN
 	offset += len(msgBytes)
 	data[offset] = 0 // null terminator
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSysMsgOnline,
+		Command:   ICQLegacySrvSysMsgOnline,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildOfflineMessage constructs an offline message packet.
@@ -442,31 +442,31 @@ func (b *V5PacketBuilderImpl) BuildOfflineMessage(session *LegacySession, msg *L
 	offset += len(msgBytes)
 	data[offset] = 0 // null terminator
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSysMsgOffline, // 0x00DC
+		Command:   ICQLegacySrvSysMsgOffline, // 0x00DC
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildOfflineMsgDone constructs an end of offline messages packet.
 func (b *V5PacketBuilderImpl) BuildOfflineMsgDone(session *LegacySession, seq2 uint16) []byte {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSysMsgDone,
+		Command:   ICQLegacySrvSysMsgDone,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildMetaAck constructs a META_USER acknowledgment packet.
@@ -477,17 +477,17 @@ func (b *V5PacketBuilderImpl) BuildMetaAck(session *LegacySession, seq2 uint16, 
 	binary.LittleEndian.PutUint16(data[0:2], subCommand)
 	data[2] = 0x0A // Success code
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildMetaUserInfo constructs a META_USER info response packet.
@@ -496,19 +496,19 @@ func (b *V5PacketBuilderImpl) BuildMetaUserInfo(session *LegacySession, seq2 uin
 	if info == nil {
 		// Send empty/fail response
 		data := make([]byte, 3)
-		binary.LittleEndian.PutUint16(data[0:2], wire.ICQLegacySrvMetaUserInfo)
+		binary.LittleEndian.PutUint16(data[0:2], ICQLegacySrvMetaUserInfo)
 		data[2] = 0x32 // Fail code
 
-		pkt := &wire.V5ServerPacket{
-			Version:   wire.ICQLegacyVersionV5,
+		pkt := &V5ServerPacket{
+			Version:   ICQLegacyVersionV5,
 			SessionID: session.SessionID,
-			Command:   wire.ICQLegacySrvMetaUser,
+			Command:   ICQLegacySrvMetaUser,
 			SeqNum1:   session.NextServerSeqNum(),
 			SeqNum2:   seq2,
 			UIN:       session.UIN,
 			Data:      data,
 		}
-		return wire.MarshalV5ServerPacket(pkt)
+		return MarshalV5ServerPacket(pkt)
 	}
 
 	// Build user info data
@@ -524,7 +524,7 @@ func (b *V5PacketBuilderImpl) BuildMetaUserInfo(session *LegacySession, seq2 uin
 	offset := 0
 
 	// Sub-command
-	binary.LittleEndian.PutUint16(data[offset:], wire.ICQLegacySrvMetaUserInfo)
+	binary.LittleEndian.PutUint16(data[offset:], ICQLegacySrvMetaUserInfo)
 	offset += 2
 
 	// Result code (0x0A = success)
@@ -576,17 +576,17 @@ func (b *V5PacketBuilderImpl) BuildMetaUserInfo(session *LegacySession, seq2 uin
 	offset++
 	data[offset] = 0
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildSearchResult constructs a search result packet.
@@ -602,19 +602,19 @@ func (b *V5PacketBuilderImpl) BuildSearchResult(session *LegacySession, seq2 uin
 		// Send empty last result with failure code to indicate no results
 		// From iserverd: sub_cmd + result(0x32=failure)
 		data := make([]byte, 3)
-		binary.LittleEndian.PutUint16(data[0:2], wire.ICQLegacySrvMetaUserLastFound)
+		binary.LittleEndian.PutUint16(data[0:2], ICQLegacySrvMetaUserLastFound)
 		data[2] = 0x32 // META_FAILURE - no results found
 
-		pkt := &wire.V5ServerPacket{
-			Version:   wire.ICQLegacyVersionV5,
+		pkt := &V5ServerPacket{
+			Version:   ICQLegacyVersionV5,
 			SessionID: session.SessionID,
-			Command:   wire.ICQLegacySrvMetaUser,
+			Command:   ICQLegacySrvMetaUser,
 			SeqNum1:   session.NextServerSeqNum(),
 			SeqNum2:   seq2,
 			UIN:       session.UIN,
 			Data:      data,
 		}
-		return wire.MarshalV5ServerPacket(pkt)
+		return MarshalV5ServerPacket(pkt)
 	}
 
 	info := results[0]
@@ -640,9 +640,9 @@ func (b *V5PacketBuilderImpl) BuildSearchResult(session *LegacySession, seq2 uin
 	offset := 0
 
 	// Sub-command
-	subCmd := wire.ICQLegacySrvMetaUserFound
+	subCmd := ICQLegacySrvMetaUserFound
 	if isLast {
-		subCmd = wire.ICQLegacySrvMetaUserLastFound
+		subCmd = ICQLegacySrvMetaUserLastFound
 	}
 	binary.LittleEndian.PutUint16(data[offset:], subCmd)
 	offset += 2
@@ -708,17 +708,17 @@ func (b *V5PacketBuilderImpl) BuildSearchResult(session *LegacySession, seq2 uin
 		binary.LittleEndian.PutUint32(data[offset:], 0)
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // EncryptPacket encrypts a V5 packet using the session ID.
@@ -739,8 +739,8 @@ func (b *V5PacketBuilderImpl) EncryptPacket(packet []byte, sessionID uint32) []b
 // V3 format packet: VERSION(2) + COMMAND(2) + SEQ1(2) + SEQ2(2) + UIN(4) + CHECKSUM(4)
 func (b *V5PacketBuilderImpl) BuildDepsListReply(uin uint32, seq2 uint16) []byte {
 	buf := make([]byte, 16)
-	binary.LittleEndian.PutUint16(buf[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(buf[2:4], wire.ICQLegacySrvUserDepsList)
+	binary.LittleEndian.PutUint16(buf[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(buf[2:4], ICQLegacySrvUserDepsList)
 	binary.LittleEndian.PutUint16(buf[4:6], 0x0000) // seq1
 	binary.LittleEndian.PutUint16(buf[6:8], seq2)
 	binary.LittleEndian.PutUint32(buf[8:12], uin)
@@ -752,16 +752,16 @@ func (b *V5PacketBuilderImpl) BuildDepsListReply(uin uint32, seq2 uint16) []byte
 // BuildAckToAddr constructs an ACK packet for sending to an address (before session exists).
 // Used during login flow when session is not yet established.
 func (b *V5PacketBuilderImpl) BuildAckToAddr(sessionID uint32, uin uint32, seq1, seq2 uint16) []byte {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: sessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seq1,
 		SeqNum2:   seq2,
 		UIN:       uin,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }
 
 // BuildFirstLoginReply constructs a first login reply packet.
@@ -773,15 +773,15 @@ func (b *V5PacketBuilderImpl) BuildFirstLoginReply(sessionID uint32, uin uint32,
 	binary.LittleEndian.PutUint32(data[0:4], sessionID2)
 	binary.LittleEndian.PutUint16(data[4:6], 0x0001)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: sessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seq1,
 		SeqNum2:   seq2,
 		UIN:       uin,
 		Data:      data,
 	}
 
-	return wire.MarshalV5ServerPacket(pkt)
+	return MarshalV5ServerPacket(pkt)
 }

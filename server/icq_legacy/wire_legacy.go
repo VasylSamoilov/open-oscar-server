@@ -1,4 +1,4 @@
-package wire
+package icq_legacy
 
 import (
 	"bytes"
@@ -388,11 +388,11 @@ func WriteLegacyString(w io.Writer, s string) error {
 // After the 10-byte header (VER+CMD+SEQ+UIN), the data payload is:
 //
 //	PORT(4) + PWD_LEN(2) + PASSWORD + X1(4) + USER_IP(4) + X2(1) +
-//	STATUS(2) + TCP_VERSION(2) + X3(12)
+//	STATUS(2) + DC_VERSION(2) + X3(12)
 //
 // Note: STATUS is 2 bytes (unsigned short), NOT 4 bytes. The client's
 // m_nLogonStatus is declared as unsigned short in icqpacket.h.
-// TCP_VERSION follows immediately after status (also unsigned short).
+// DC_VERSION follows immediately after status (also unsigned short).
 func ParseV2LoginPacket(data []byte) (*LegacyLoginPacket, error) {
 	if len(data) < 15 { // Minimum: PORT(4) + PWD_LEN(2) + 1 char + null + X1(4) + IP(4)
 		return nil, fmt.Errorf("login packet too short: %d bytes", len(data))
@@ -441,9 +441,9 @@ func ParseV2LoginPacket(data []byte) (*LegacyLoginPacket, error) {
 	}
 	pkt.Status = uint32(status)
 
-	// Read TCP version (2 bytes) - m_nTcpVersion is unsigned short
-	var tcpVersion uint16
-	if err := binary.Read(r, binary.LittleEndian, &tcpVersion); err != nil {
+	// Read DC version (2 bytes) - m_nTcpVersion is unsigned short
+	var dcVersion uint16
+	if err := binary.Read(r, binary.LittleEndian, &dcVersion); err != nil {
 		// Optional field
 		return pkt, nil
 	}
@@ -552,7 +552,7 @@ func BuildV2BadPassword(seqNum uint16) *V2ServerPacket {
 // Field breakdown matching the client's read order:
 //
 //	REMOTE_UIN(4) + REMOTE_IP(4) + REMOTE_PORT(2) + REMOTE_REAL_IP(4) +
-//	TCP_VERSION(2) + X1(1) + STATUS(2) + X2(4) + X3(2) = 25 bytes
+//	DC_VERSION(2) + X1(1) + STATUS(2) + X2(4) + X3(2) = 25 bytes
 //
 // The client treats bytes 10-16 as "junk" (it reads them into junkLong,
 // junkShort, junkChar but discards the values). STATUS must be at offset 17
@@ -581,7 +581,7 @@ func BuildV2UserOnline(seqNum uint16, uin uint32, status uint32, ip net.IP, port
 
 	// Next 7 bytes are read by client as junkLong(4) + junkShort(2) + junkChar(1)
 	// but discarded. We fill them with meaningful data matching the original
-	// Mirabilis server format: REAL_IP(4) + TCP_VERSION(2) + X1(1)
+	// Mirabilis server format: REAL_IP(4) + DC_VERSION(2) + X1(1)
 
 	// REMOTE_REAL_IP (4 bytes) - "inner" IP address
 	if ip != nil {
@@ -592,7 +592,7 @@ func BuildV2UserOnline(seqNum uint16, uin uint32, status uint32, ip net.IP, port
 	}
 	offset += 4
 
-	// TCP_VERSION (2 bytes) - client's TCP version (junkShort)
+	// DC_VERSION (2 bytes) - client's DC version (junkShort)
 	binary.LittleEndian.PutUint16(data[offset:], 0x0003)
 	offset += 2
 

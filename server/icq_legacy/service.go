@@ -248,7 +248,7 @@ func (s *ICQLegacyService) ProcessContactList(ctx context.Context, req ContactLi
 				status.Online = true
 				// For OSCAR clients, we default to online status
 				// The actual OSCAR status would need to be retrieved from session instances
-				status.Status = wire.ICQLegacyStatusOnline
+				status.Status = ICQLegacyStatusOnline
 				status.Version = 0 // OSCAR client, not legacy
 				s.logger.Debug("ProcessContactList: contact online (OSCAR)",
 					"contact_uin", contactUIN,
@@ -339,7 +339,7 @@ func (s *ICQLegacyService) ProcessUserAdd(ctx context.Context, req UserAddReques
 	oscarSession := s.sessionRetriever.RetrieveSession(targetScreenName)
 	if oscarSession != nil {
 		result.TargetOnline = true
-		result.TargetStatus = wire.ICQLegacyStatusOnline
+		result.TargetStatus = ICQLegacyStatusOnline
 		result.TargetVersion = 0 // OSCAR client, not legacy
 		// For OSCAR clients, we don't send "you were added" via legacy protocol
 		// OSCAR has its own buddy notification mechanism
@@ -403,7 +403,7 @@ func (s *ICQLegacyService) ProcessMessage(ctx context.Context, req MessageReques
 			result.Delivered = true
 			// Get the protocol version from the session
 			// The handler will use this to route to the correct protocol handler
-			result.TargetVersion = wire.ICQLegacyVersionV5 // Default, actual version determined by session
+			result.TargetVersion = ICQLegacyVersionV5 // Default, actual version determined by session
 
 			s.logger.Debug("ProcessMessage: target online (legacy)",
 				"to", req.ToUIN,
@@ -693,7 +693,7 @@ func (s *ICQLegacyService) GetOfflineMessages(ctx context.Context, uin uint32) (
 			msgText, err := wire.UnmarshalICBMMessageText(payload)
 			if err == nil {
 				legacyMsg.Message = msgText
-				legacyMsg.MsgType = wire.ICQLegacyMsgText
+				legacyMsg.MsgType = ICQLegacyMsgText
 			}
 		}
 
@@ -866,7 +866,7 @@ func (s *ICQLegacyService) GetUserInfoForProtocol(ctx context.Context, targetUIN
 	oscarSession := s.sessionRetriever.RetrieveSession(screenName)
 	if oscarSession != nil {
 		result.Online = true
-		result.Status = wire.ICQLegacyStatusOnline
+		result.Status = ICQLegacyStatusOnline
 		s.logger.Debug("GetUserInfoForProtocol: user online (OSCAR)", "uin", targetUIN)
 	}
 
@@ -1694,7 +1694,7 @@ func (s *ICQLegacyService) userToSearchResult(user state.User) *LegacyUserSearch
 	session := s.sessionRetriever.RetrieveSession(user.IdentScreenName)
 	if session != nil {
 		result.Online = true
-		result.Status = wire.ICQLegacyStatusOnline
+		result.Status = ICQLegacyStatusOnline
 	}
 
 	return result
@@ -1720,7 +1720,7 @@ func mapLegacyStatusToOSCAR(legacyStatus uint32) uint32 {
 		oscarStatus = wire.OServiceUserStatusChat
 	}
 
-	if legacyStatus&wire.ICQLegacyStatusInvisible != 0 {
+	if legacyStatus&ICQLegacyStatusInvisible != 0 {
 		oscarStatus |= wire.OServiceUserStatusInvisible
 	}
 
@@ -1733,21 +1733,21 @@ func mapOSCARStatusToLegacy(oscarStatus uint32) uint32 {
 	var legacyStatus uint32
 
 	if oscarStatus&wire.OServiceUserStatusAway != 0 {
-		legacyStatus = wire.ICQLegacyStatusAway
+		legacyStatus = ICQLegacyStatusAway
 	} else if oscarStatus&wire.OServiceUserStatusDND != 0 {
-		legacyStatus = wire.ICQLegacyStatusDND
+		legacyStatus = ICQLegacyStatusDND
 	} else if oscarStatus&wire.OServiceUserStatusOut != 0 {
-		legacyStatus = wire.ICQLegacyStatusNA
+		legacyStatus = ICQLegacyStatusNA
 	} else if oscarStatus&wire.OServiceUserStatusBusy != 0 {
-		legacyStatus = wire.ICQLegacyStatusOccupied
+		legacyStatus = ICQLegacyStatusOccupied
 	} else if oscarStatus&wire.OServiceUserStatusChat != 0 {
-		legacyStatus = wire.ICQLegacyStatusFFC
+		legacyStatus = ICQLegacyStatusFFC
 	} else {
-		legacyStatus = wire.ICQLegacyStatusOnline
+		legacyStatus = ICQLegacyStatusOnline
 	}
 
 	if oscarStatus&wire.OServiceUserStatusInvisible != 0 {
-		legacyStatus |= wire.ICQLegacyStatusInvisible
+		legacyStatus |= ICQLegacyStatusInvisible
 	}
 
 	return legacyStatus

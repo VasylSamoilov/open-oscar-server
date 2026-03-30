@@ -3,8 +3,6 @@ package icq_legacy
 import (
 	"encoding/binary"
 	"net"
-
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V1PacketBuilder constructs V1 protocol packets.
@@ -22,7 +20,7 @@ func NewV1PacketBuilder() *V1PacketBuilder {
 // patchVersion overwrites the first 2 bytes (version field) with V1.
 func patchVersion(pkt []byte) []byte {
 	if len(pkt) >= 2 {
-		binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV1)
+		binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV1)
 	}
 	return pkt
 }
@@ -82,11 +80,11 @@ func (b *V1PacketBuilder) BuildDepsList(seqNum uint16, uin uint32) []byte {
 	binary.LittleEndian.PutUint16(data[8:10], 0x0002)
 	binary.LittleEndian.PutUint16(data[10:12], 0x002a)
 
-	pkt := &wire.V2ServerPacket{
-		Version: wire.ICQLegacyVersionV1,
-		Command: wire.ICQLegacySrvUserDepsList,
+	pkt := &V2ServerPacket{
+		Version: ICQLegacyVersionV1,
+		Command: ICQLegacySrvUserDepsList,
 		SeqNum:  seqNum,
 		Data:    data,
 	}
-	return wire.MarshalV2ServerPacket(pkt)
+	return MarshalV2ServerPacket(pkt)
 }

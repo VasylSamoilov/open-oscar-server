@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V3Handler handles ICQ V3 protocol packets
@@ -98,8 +96,8 @@ func (h *V3Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 	// send NOT_CONNECTED to force the client to reconnect.
 	if session == nil {
 		switch command {
-		case wire.ICQLegacyCmdAck, wire.ICQLegacyCmdFirstLogin,
-			wire.ICQLegacyCmdGetDeps, wire.ICQLegacyCmdLogin:
+		case ICQLegacyCmdAck, ICQLegacyCmdFirstLogin,
+			ICQLegacyCmdGetDeps, ICQLegacyCmdLogin:
 			// Allow these through - they don't require a session
 		default:
 			h.logger.Info("V3 packet from unknown session, sending NOT_CONNECTED",
@@ -113,32 +111,32 @@ func (h *V3Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 
 	// Handle V3 commands directly (matching iserverd's handle_v3_proto)
 	switch command {
-	case wire.ICQLegacyCmdFirstLogin:
+	case ICQLegacyCmdFirstLogin:
 		return h.handleFirstLogin(addr, seq1, seq2, uin)
-	case wire.ICQLegacyCmdLogin:
+	case ICQLegacyCmdLogin:
 		return h.handleLogin(session, addr, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdGetDeps:
+	case ICQLegacyCmdGetDeps:
 		return h.handleGetDeps(addr, seq1, seq2, data)
-	case wire.ICQLegacyCmdUserGetInfo:
+	case ICQLegacyCmdUserGetInfo:
 		return h.handleGetInfo(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdAck:
+	case ICQLegacyCmdAck:
 		h.logger.Debug("received ACK", "seq1", seq1, "seq2", seq2)
 		return nil
-	case wire.ICQLegacyCmdKeepAlive, wire.ICQLegacyCmdKeepAlive2:
+	case ICQLegacyCmdKeepAlive, ICQLegacyCmdKeepAlive2:
 		return h.handlePing(session, addr, seq1, seq2, uin)
-	case wire.ICQLegacyCmdLogoff:
+	case ICQLegacyCmdLogoff:
 		return h.handleLogoff(session, seq1, seq2, uin)
-	case wire.ICQLegacyCmdContactList:
+	case ICQLegacyCmdContactList:
 		return h.handleContactList(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdSetStatus:
+	case ICQLegacyCmdSetStatus:
 		return h.handleSetStatus(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdThruServer, wire.ICQLegacyCmdAuthorize: // 0x010E and 0x0456 (authorize)
+	case ICQLegacyCmdThruServer, ICQLegacyCmdAuthorize: // 0x010E and 0x0456 (authorize)
 		return h.handleMessage(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdUserAdd:
+	case ICQLegacyCmdUserAdd:
 		return h.handleUserAdd(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdSysMsgReq:
+	case ICQLegacyCmdSysMsgReq:
 		return h.handleOfflineMsgReq(session, seq1, seq2, uin)
-	case wire.ICQLegacyCmdSetBasicInfo:
+	case ICQLegacyCmdSetBasicInfo:
 		return h.handleSetBasicInfo(session, seq1, seq2, uin, data)
 	case 0x0582: // SetHomeInfo
 		return h.handleSetHomeInfo(session, seq1, seq2, uin, data)
@@ -154,27 +152,27 @@ func (h *V3Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 		return h.handleVisibleList(session, seq1, seq2, uin, data)
 	case 0x06A4: // ICQ_CMDxRCV_INVISxLIST - invisible list
 		return h.handleInvisibleList(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdSearchStart: // 0x05C8 - Search user
+	case ICQLegacyCmdSearchStart: // 0x05C8 - Search user
 		return h.handleSearchStart(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdGetDeps1: // 0x05F0 - Get deps list during session (pre-auth list, historical iserverd naming)
+	case ICQLegacyCmdGetDeps1: // 0x05F0 - Get deps list during session (pre-auth list, historical iserverd naming)
 		return h.handleGetDeps1(session, seq1, seq2, uin, data)
 	case 0x05AA: // ICQ_CMDxRCV_GETxNOTES - Get notes
 		return h.handleGetNotes(session, seq1, seq2, uin, data)
 	case 0x0596: // ICQ_CMDxRCV_SETxNOTES - Set notes
 		return h.handleSetNotes(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdSetPassword: // 0x049C - Set password
+	case ICQLegacyCmdSetPassword: // 0x049C - Set password
 		return h.handleSetPassword(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdSetAuth: // 0x0514 - Set auth mode
+	case ICQLegacyCmdSetAuth: // 0x0514 - Set auth mode
 		return h.handleSetAuth(session, seq1, seq2, uin, data)
 	case 0x0528: // ICQ_CMDxRCV_SETxSTATE - Set client state (not search!)
 		return h.handleSetState(session, seq1, seq2, uin, data)
 	case 0x0532: // ICQ_CMDxRCV_USAGExSTATS - Usage statistics
 		return h.handleUsageStats(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdGetExternals: // 0x04C4 - Get externals
+	case ICQLegacyCmdGetExternals: // 0x04C4 - Get externals
 		return h.handleGetExternals(session, seq1, seq2, uin, data)
 	case 0x0442: // ICQ_CMDxRCV_SYSxMSGxDONExACK - System message ack
 		return h.handleSysAck(session, seq1, seq2, uin, data)
-	case wire.ICQLegacyCmdReconnect: // 0x015E - Reconnect/online info
+	case ICQLegacyCmdReconnect: // 0x015E - Reconnect/online info
 		return h.handleOnlineInfo(session, seq1, seq2, uin, data)
 	case 0x0460: // ICQ_CMDxRCV_USERxGETINFO1 - Get basic info only
 		return h.handleGetInfo1(session, seq1, seq2, uin, data)
@@ -249,7 +247,7 @@ func (h *V3Handler) handleGetDeps(addr *net.UDPAddr, seq1, seq2 uint16, data []b
 	authReq := AuthRequest{
 		UIN:      uin,
 		Password: password,
-		Version:  wire.ICQLegacyVersionV3,
+		Version:  ICQLegacyVersionV3,
 	}
 
 	authResult, err := h.service.AuthenticateUser(ctx, authReq)
@@ -333,9 +331,9 @@ func (h *V3Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, seq1,
 	authReq := AuthRequest{
 		UIN:      uin,
 		Password: password,
-		Status:   wire.ICQLegacyStatusOnline, // Default status for V3
+		Status:   ICQLegacyStatusOnline, // Default status for V3
 		TCPPort:  port,
-		Version:  wire.ICQLegacyVersionV3,
+		Version:  ICQLegacyVersionV3,
 	}
 
 	authResult, err := h.service.AuthenticateUser(ctx, authReq)
@@ -353,7 +351,7 @@ func (h *V3Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, seq1,
 	}
 
 	// 3. Create session (handler responsibility - session management)
-	newSession, err := h.sessions.CreateSession(uin, addr, wire.ICQLegacyVersionV3)
+	newSession, err := h.sessions.CreateSession(uin, addr, ICQLegacyVersionV3)
 	if err != nil {
 		h.logger.Error("failed to create session", "err", err, "uin", uin)
 		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(seq1, seq2, uin))
@@ -771,10 +769,10 @@ func (h *V3Handler) handleUserAdd(session *LegacySession, seq1, seq2 uint16, uin
 
 				if h.dispatcher != nil {
 					// Use dispatcher for cross-protocol support
-					h.dispatcher.SendOnlineMessage(targetSession, req.FromUIN, wire.ICQLegacyMsgAdded, youWereAddedMsg)
+					h.dispatcher.SendOnlineMessage(targetSession, req.FromUIN, ICQLegacyMsgAdded, youWereAddedMsg)
 				} else {
 					// Fallback to V3 format
-					h.sendOnlineMessage(targetSession, req.FromUIN, wire.ICQLegacyMsgAdded, youWereAddedMsg, 0)
+					h.sendOnlineMessage(targetSession, req.FromUIN, ICQLegacyMsgAdded, youWereAddedMsg, 0)
 				}
 
 				// Also send the adder's online status to the target.
@@ -870,8 +868,8 @@ func (h *V3Handler) handleGetInfo(session *LegacySession, seq1, seq2 uint16, uin
 func (h *V3Handler) sendAck(addr *net.UDPAddr, seq1, seq2 uint16, uin uint32) error {
 	// V3 ACK format: VERSION(2) + COMMAND(2) + SEQ1(2) + SEQ2(2) + UIN(4) + RESERVED(4)
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], wire.ICQLegacySrvAck)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvAck)
 	binary.LittleEndian.PutUint16(pkt[4:6], seq1)
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], uin)
@@ -883,8 +881,8 @@ func (h *V3Handler) sendAck(addr *net.UDPAddr, seq1, seq2 uint16, uin uint32) er
 // sendNotConnected sends not connected error
 func (h *V3Handler) sendNotConnected(addr *net.UDPAddr, seq2 uint16, uin uint32) error {
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], wire.ICQLegacySrvNotConnected)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvNotConnected)
 	binary.LittleEndian.PutUint16(pkt[4:6], 0)
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], uin)
@@ -897,16 +895,16 @@ func (h *V3Handler) sendNotConnected(addr *net.UDPAddr, seq2 uint16, uin uint32)
 // From iserverd v3_send_user_online()
 func (h *V3Handler) sendUserOnline(session *LegacySession, uin uint32, status uint32) error {
 	// V3 USER_ONLINE format from iserverd:
-	// header(16) + UIN(4) + IP(4) + PORT(4) + INT_IP(4) + DC_TYPE(1) + STATUS(2) + ESTAT(2) + TCPVER(2) + UNKNOWN(2)
+	// header(16) + UIN(4) + IP(4) + PORT(4) + INT_IP(4) + DC_TYPE(1) + STATUS(2) + ESTAT(2) + DCVER(2) + UNKNOWN(2)
 	// Total: 16 + 4 + 4 + 4 + 4 + 1 + 2 + 2 + 2 + 2 = 41 bytes
 
 	pkt := make([]byte, 41)
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvUserOnline)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvUserOnline)
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], session.NextServerSeqNum())
 	offset += 2
@@ -945,7 +943,7 @@ func (h *V3Handler) sendUserOnline(session *LegacySession, uin uint32, status ui
 	binary.LittleEndian.PutUint16(pkt[offset:], uint16(status>>16))
 	offset += 2
 
-	// TCP version
+	// DC version
 	binary.LittleEndian.PutUint16(pkt[offset:], 0)
 	offset += 2
 
@@ -1231,9 +1229,9 @@ func (h *V3Handler) sendDeptsList1(session *LegacySession, seq2 uint16) error {
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvUserDepsList1) // 0x0082 - ICQ_CMDxSND_USERxDEPS_LIST1
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvUserDepsList1) // 0x0082 - ICQ_CMDxSND_USERxDEPS_LIST1
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], session.NextServerSeqNum())
 	offset += 2
@@ -1276,9 +1274,9 @@ func (h *V3Handler) sendOfflineMessage(session *LegacySession, seq2 uint16, msg 
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvSysMsgOffline) // 0x00DC
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvSysMsgOffline) // 0x00DC
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], session.NextServerSeqNum())
 	offset += 2
@@ -1331,7 +1329,7 @@ func (h *V3Handler) sendOfflineMessage(session *LegacySession, seq2 uint16, msg 
 // sendOfflineMsgDone sends end of offline messages
 func (h *V3Handler) sendOfflineMsgDone(session *LegacySession, seq2 uint16) error {
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
 	binary.LittleEndian.PutUint16(pkt[2:4], 0x00E6) // ICQ_CMDxSND_SYSxMSGxDONE
 	binary.LittleEndian.PutUint16(pkt[4:6], session.NextServerSeqNum())
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
@@ -1344,7 +1342,7 @@ func (h *V3Handler) sendOfflineMsgDone(session *LegacySession, seq2 uint16) erro
 // sendReplyOK sends a generic OK response
 func (h *V3Handler) sendReplyOK(session *LegacySession, seq2 uint16, command uint16) error {
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
 	binary.LittleEndian.PutUint16(pkt[2:4], command)
 	binary.LittleEndian.PutUint16(pkt[4:6], session.NextServerSeqNum())
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
@@ -1365,7 +1363,7 @@ func (h *V3Handler) sendReplyOK(session *LegacySession, seq2 uint16, command uin
 //	0 = no more results, 1 = more results available (pagination)
 func (h *V3Handler) sendSearchDone(session *LegacySession, seq2 uint16, more ...bool) error {
 	pkt := make([]byte, 17)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
 	binary.LittleEndian.PutUint16(pkt[2:4], 0x00A0) // ICQ_CMDxSND_SEARCHxDONE
 	binary.LittleEndian.PutUint16(pkt[4:6], session.NextServerSeqNum())
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
@@ -1394,7 +1392,7 @@ func (h *V3Handler) sendSearchFound(session *LegacySession, seq2 uint16, foundUI
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], 0x008C) // ICQ_CMDxSND_SEARCHxFOUND
 	offset += 2
@@ -1478,9 +1476,9 @@ func (h *V3Handler) sendOnlineMessage(session *LegacySession, fromUIN uint32, ms
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvSysMsgOnline) // 0x0104
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvSysMsgOnline) // 0x0104
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], session.NextServerSeqNum())
 	offset += 2
@@ -1526,9 +1524,9 @@ func (h *V3Handler) sendUserOffline(session *LegacySession, uin uint32) error {
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvUserOffline)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvUserOffline)
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], session.NextServerSeqNum())
 	offset += 2
@@ -1564,9 +1562,9 @@ func (h *V3Handler) sendUserStatus(session *LegacySession, uin uint32, status ui
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvUserStatus) // 0x01A4
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvUserStatus) // 0x01A4
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], session.NextServerSeqNum())
 	offset += 2
@@ -1980,7 +1978,7 @@ func (h *V3Handler) sendNotes(session *LegacySession, seq2 uint16, targetUIN uin
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], 0x0352) // ICQ_CMDxSND_USERxNOTES
 	offset += 2
@@ -2019,7 +2017,7 @@ func (h *V3Handler) sendExternals(session *LegacySession, seq2 uint16) error {
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], 0x00B4) // ICQ_CMDxSND_USERxEXTERNALS
 	offset += 2

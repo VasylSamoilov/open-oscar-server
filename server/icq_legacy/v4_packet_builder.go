@@ -3,8 +3,6 @@ package icq_legacy
 import (
 	"encoding/binary"
 	"fmt"
-
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V4PacketBuilder constructs V4 protocol packets.
@@ -97,8 +95,8 @@ func (b *V4PacketBuilderImpl) CalculateCheckcode(packet []byte) uint32 {
 	tableOfs := byte(0)
 
 	// Get values and INVERT them (this is what the client expects)
-	packetVal := ^packet[packetOfs]     // inverted
-	tableVal := ^wire.V4Table[tableOfs] // inverted
+	packetVal := ^packet[packetOfs] // inverted
+	tableVal := ^V4Table[tableOfs]  // inverted
 
 	// Build checkB with inverted values
 	checkB := uint32(packetOfs)<<24 | uint32(packetVal)<<16 | uint32(tableOfs)<<8 | uint32(tableVal)
@@ -129,9 +127,9 @@ func (b *V4PacketBuilderImpl) BuildLoginReply(session *LegacySession, seq2 uint1
 	// V3 Header (16 bytes)
 	serverSeq := session.NextServerSeqNum()
 
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3) // 03 00
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3) // 03 00
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvHello) // 5a 00
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvHello) // 5a 00
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], serverSeq) // server's seq1
 	offset += 2
@@ -184,8 +182,8 @@ func (b *V4PacketBuilderImpl) BuildLoginReply(session *LegacySession, seq2 uint1
 // V3 server packet format: VERSION(2) + COMMAND(2) + SEQ1(2) + SEQ2(2) + UIN(4) + ZERO(4)
 func (b *V4PacketBuilderImpl) BuildBadPassword(seq1, seq2 uint16, uin uint32) []byte {
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], wire.ICQLegacySrvWrongPasswd)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvWrongPasswd)
 	binary.LittleEndian.PutUint16(pkt[4:6], seq1)
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], uin)
@@ -196,8 +194,8 @@ func (b *V4PacketBuilderImpl) BuildBadPassword(seq1, seq2 uint16, uin uint32) []
 // BuildAck constructs an ACK packet in V3 format with checkcode.
 func (b *V4PacketBuilderImpl) BuildAck(seq1, seq2 uint16, uin uint32) []byte {
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], wire.ICQLegacySrvAck)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvAck)
 	binary.LittleEndian.PutUint16(pkt[4:6], seq1)
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], uin)
@@ -213,8 +211,8 @@ func (b *V4PacketBuilderImpl) BuildAck(seq1, seq2 uint16, uin uint32) []byte {
 // V3 server packet format: VERSION(2) + COMMAND(2) + SEQ1(2) + SEQ2(2) + UIN(4) + ZERO(4)
 func (b *V4PacketBuilderImpl) BuildNotConnected(seq2 uint16, uin uint32) []byte {
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], wire.ICQLegacySrvNotConnected)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvNotConnected)
 	binary.LittleEndian.PutUint16(pkt[4:6], 0)
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], uin)
@@ -224,12 +222,12 @@ func (b *V4PacketBuilderImpl) BuildNotConnected(seq2 uint16, uin uint32) []byte 
 
 // BuildUserOnline constructs a user online notification packet.
 // From iserverd v3_send_user_online() - V3 and V4 share the same server packet format.
-// Data: UIN(4) + IP(4) + PORT(4) + REAL_IP(4) + DC_TYPE(1) + STATUS(2) + ESTATUS(2) + TCPVER(2) + UNKNOWN(2)
+// Data: UIN(4) + IP(4) + PORT(4) + REAL_IP(4) + DC_TYPE(1) + STATUS(2) + ESTATUS(2) + DCVER(2) + UNKNOWN(2)
 // Total data: 25 bytes, total packet: 41 bytes
 func (b *V4PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status uint32) []byte {
 	pkt := make([]byte, 41)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], wire.ICQLegacySrvUserOnline)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvUserOnline)
 	binary.LittleEndian.PutUint16(pkt[4:6], seqNum)
 	binary.LittleEndian.PutUint16(pkt[6:8], 0)
 	binary.LittleEndian.PutUint32(pkt[8:12], 0) // recipient UIN (set by caller)
@@ -256,7 +254,7 @@ func (b *V4PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status 
 	// Extended status (high 16 bits)
 	binary.LittleEndian.PutUint16(pkt[offset:], uint16(status>>16))
 	offset += 2
-	// TCP version (2 bytes)
+	// DC version (2 bytes)
 	offset += 2
 	// Unknown (2 bytes)
 	offset += 2
@@ -268,8 +266,8 @@ func (b *V4PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status 
 // V3 server packet format with checkcode: VERSION(2) + COMMAND(2) + SEQ1(2) + SEQ2(2) + UIN(4) + CHECKCODE(4)
 func (b *V4PacketBuilderImpl) BuildContactListDone(seqNum uint16, seq2 uint16, uin uint32) []byte {
 	pkt := make([]byte, 16)
-	binary.LittleEndian.PutUint16(pkt[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], wire.ICQLegacySrvUserListDone)
+	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvUserListDone)
 	binary.LittleEndian.PutUint16(pkt[4:6], seqNum)
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], uin)
@@ -292,9 +290,9 @@ func (b *V4PacketBuilderImpl) BuildOnlineMessage(seqNum uint16, fromUIN uint32, 
 	offset := 0
 
 	// Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvSysMsgOnline) // 0x0104
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvSysMsgOnline) // 0x0104
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], seqNum)
 	offset += 2
@@ -365,9 +363,9 @@ func (b *V4PacketBuilderImpl) BuildBasicInfo(seqNum uint16, seq2 uint16, uin uin
 	offset := 0
 
 	// Header - Client expects 0x0118 (ICQLegacySrvInfoReply)
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvInfoReply) // 0x0118
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvInfoReply) // 0x0118
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], seqNum)
 	offset += 2
@@ -442,9 +440,9 @@ func (b *V4PacketBuilderImpl) BuildRegisterInfo(seq2 uint16, uin uint32) []byte 
 	offset := 0
 
 	// V3 Header
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvRegisterInfo)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvRegisterInfo)
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], 0) // seq1 = 0 for server-initiated
 	offset += 2
@@ -486,9 +484,9 @@ func (b *V4PacketBuilderImpl) BuildRegistrationOK(seq2 uint16, newUIN uint32, pa
 	offset := 0
 
 	// V3 Header - UIN field contains the NEW UIN
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacyVersionV3)
 	offset += 2
-	binary.LittleEndian.PutUint16(pkt[offset:], wire.ICQLegacySrvNewUIN) // 0x0046
+	binary.LittleEndian.PutUint16(pkt[offset:], ICQLegacySrvNewUIN) // 0x0046
 	offset += 2
 	binary.LittleEndian.PutUint16(pkt[offset:], 0) // seq1 = 0 for server-initiated
 	offset += 2

@@ -225,7 +225,7 @@ func (b *LegacyMessageBridge) handleICBMMessage(session *LegacySession, msg wire
 		"text_len", len(text),
 	)
 
-	if err := b.dispatcher.SendOnlineMessage(session, fromUIN, wire.ICQLegacyMsgText, text); err != nil {
+	if err := b.dispatcher.SendOnlineMessage(session, fromUIN, ICQLegacyMsgText, text); err != nil {
 		b.logger.Debug("failed to deliver ICBM to legacy client",
 			"to_uin", session.UIN,
 			"from_uin", fromUIN,
@@ -278,33 +278,33 @@ func oscarStatusToLegacy(oscarStatus uint32) uint32 {
 	// Map the base status (lower byte)
 	switch oscarStatus & 0xFF {
 	case 0x00:
-		legacyStatus = wire.ICQLegacyStatusOnline
+		legacyStatus = ICQLegacyStatusOnline
 	case 0x01:
-		legacyStatus = wire.ICQLegacyStatusAway
+		legacyStatus = ICQLegacyStatusAway
 	case 0x02:
-		legacyStatus = wire.ICQLegacyStatusDND
+		legacyStatus = ICQLegacyStatusDND
 	case 0x04:
-		legacyStatus = wire.ICQLegacyStatusNA
+		legacyStatus = ICQLegacyStatusNA
 	case 0x10:
-		legacyStatus = wire.ICQLegacyStatusOccupied
+		legacyStatus = ICQLegacyStatusOccupied
 	case 0x20:
-		legacyStatus = wire.ICQLegacyStatusFFC
+		legacyStatus = ICQLegacyStatusFFC
 	default:
-		legacyStatus = wire.ICQLegacyStatusOnline
+		legacyStatus = ICQLegacyStatusOnline
 	}
 
 	// Map flags
 	if oscarStatus&wire.OServiceUserStatusInvisible != 0 {
-		legacyStatus |= wire.ICQLegacyStatusInvisible
+		legacyStatus |= ICQLegacyStatusInvisible
 	}
 	if oscarStatus&wire.OServiceUserStatusWebAware != 0 {
-		legacyStatus |= wire.ICQLegacyStatusFlagWebAware
+		legacyStatus |= ICQLegacyStatusFlagWebAware
 	}
 	if oscarStatus&wire.OServiceUserStatusBirthday != 0 {
-		legacyStatus |= wire.ICQLegacyStatusFlagBirthday
+		legacyStatus |= ICQLegacyStatusFlagBirthday
 	}
 	if oscarStatus&wire.OServiceUserStatusDirectRequireAuth != 0 {
-		legacyStatus |= wire.ICQLegacyStatusFlagDCAuth
+		legacyStatus |= ICQLegacyStatusFlagDCAuth
 	}
 
 	return legacyStatus

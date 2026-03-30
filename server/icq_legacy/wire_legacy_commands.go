@@ -1,4 +1,4 @@
-package wire
+package icq_legacy
 
 // ICQ Legacy Protocol Command Constants
 // Ported from iserverd v3_defines.h and v5_defines.h

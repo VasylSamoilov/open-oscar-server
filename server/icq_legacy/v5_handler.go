@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/mk6i/open-oscar-server/state"
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V5Handler handles ICQ V5 protocol packets
@@ -71,14 +70,14 @@ func (h *V5Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 	copy(decrypted, packet)
 
 	// Decrypt the packet (sessionID is not used - key is derived from packet)
-	wire.DecryptV5Packet(decrypted, 0)
+	DecryptV5Packet(decrypted, 0)
 
 	h.logger.Debug("V5 packet after decryption",
 		"hex", fmt.Sprintf("%X", decrypted),
 	)
 
 	// Parse decrypted packet
-	pkt, err := wire.UnmarshalV5ClientPacket(decrypted)
+	pkt, err := UnmarshalV5ClientPacket(decrypted)
 	if err != nil {
 		return fmt.Errorf("parsing V5 packet: %w", err)
 	}
@@ -107,9 +106,9 @@ func (h *V5Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 	// and triggers icqRelogon().
 	if session == nil {
 		switch pkt.Command {
-		case wire.ICQLegacyCmdAck, wire.ICQLegacyCmdFirstLogin,
-			wire.ICQLegacyCmdGetDeps, wire.ICQLegacyCmdLogin,
-			wire.ICQLegacyCmdRegNewUser:
+		case ICQLegacyCmdAck, ICQLegacyCmdFirstLogin,
+			ICQLegacyCmdGetDeps, ICQLegacyCmdLogin,
+			ICQLegacyCmdRegNewUser:
 			// Allow these through - they don't require a session
 		default:
 			h.logger.Info("V5 packet from unknown session, sending NOT_CONNECTED",
@@ -123,48 +122,48 @@ func (h *V5Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 
 	// Handle ALL V5 commands directly - NO fallback to V2!
 	switch pkt.Command {
-	case wire.ICQLegacyCmdAck:
+	case ICQLegacyCmdAck:
 		h.logger.Debug("received V5 ACK", "seq1", pkt.SeqNum1, "seq2", pkt.SeqNum2)
 		return nil
-	case wire.ICQLegacyCmdFirstLogin:
+	case ICQLegacyCmdFirstLogin:
 		return h.handleFirstLogin(session, addr, pkt)
-	case wire.ICQLegacyCmdGetDeps:
+	case ICQLegacyCmdGetDeps:
 		return h.handleGetDeps(session, addr, pkt)
-	case wire.ICQLegacyCmdLogin:
+	case ICQLegacyCmdLogin:
 		return h.handleLogin(session, addr, pkt)
-	case wire.ICQLegacyCmdContactList:
+	case ICQLegacyCmdContactList:
 		return h.handleContactList(session, pkt)
-	case wire.ICQLegacyCmdKeepAlive, wire.ICQLegacyCmdKeepAlive2:
+	case ICQLegacyCmdKeepAlive, ICQLegacyCmdKeepAlive2:
 		return h.handlePing(session, pkt)
-	case wire.ICQLegacyCmdLogoff:
+	case ICQLegacyCmdLogoff:
 		return h.handleLogoff(session, pkt)
-	case wire.ICQLegacyCmdSetStatus:
+	case ICQLegacyCmdSetStatus:
 		return h.handleSetStatus(session, pkt)
-	case wire.ICQLegacyCmdThruServer, wire.ICQLegacyCmdAuthorize:
+	case ICQLegacyCmdThruServer, ICQLegacyCmdAuthorize:
 		return h.handleMessage(session, pkt)
-	case wire.ICQLegacyCmdUserAdd:
+	case ICQLegacyCmdUserAdd:
 		return h.handleUserAdd(session, pkt)
-	case wire.ICQLegacyCmdSysMsgReq:
+	case ICQLegacyCmdSysMsgReq:
 		return h.handleOfflineMsgReq(session, pkt)
-	case wire.ICQLegacyCmdSysMsgDoneAck:
+	case ICQLegacyCmdSysMsgDoneAck:
 		return h.handleOfflineMsgAck(session, pkt)
-	case wire.ICQLegacyCmdMetaUser:
+	case ICQLegacyCmdMetaUser:
 		return h.handleMetaUser(session, addr, pkt)
-	case wire.ICQLegacyCmdVisibleList:
+	case ICQLegacyCmdVisibleList:
 		return h.handleVisibleList(session, pkt)
-	case wire.ICQLegacyCmdInvisibleList:
+	case ICQLegacyCmdInvisibleList:
 		return h.handleInvisibleList(session, pkt)
-	case wire.ICQLegacyCmdChangeVILists:
+	case ICQLegacyCmdChangeVILists:
 		return h.handleChangeVILists(session, pkt)
-	case wire.ICQLegacyCmdSearchUIN:
+	case ICQLegacyCmdSearchUIN:
 		return h.handleOldSearchUIN(session, pkt)
-	case wire.ICQLegacyCmdSearchUser:
+	case ICQLegacyCmdSearchUser:
 		return h.handleOldSearch(session, pkt)
-	case wire.ICQLegacyCmdInfoReq:
+	case ICQLegacyCmdInfoReq:
 		return h.handleOldInfoReq(session, pkt)
-	case wire.ICQLegacyCmdExtInfoReq:
+	case ICQLegacyCmdExtInfoReq:
 		return h.handleOldExtInfoReq(session, pkt)
-	case wire.ICQLegacyCmdRegNewUser:
+	case ICQLegacyCmdRegNewUser:
 		return h.handleAckNewUIN(session, pkt)
 	case 0x0532, 0x0533: // CMD_META_SEARCH_WHITE - white pages search sent directly
 		return h.handleDirectWhiteSearch(session, pkt)
@@ -189,7 +188,7 @@ func (h *V5Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 }
 
 // handleMetaUser processes META_USER commands
-func (h *V5Handler) handleMetaUser(session *LegacySession, addr *net.UDPAddr, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleMetaUser(session *LegacySession, addr *net.UDPAddr, pkt *V5ClientPacket) error {
 	if len(pkt.Data) < 2 {
 		return fmt.Errorf("META_USER packet too short")
 	}
@@ -214,41 +213,41 @@ func (h *V5Handler) handleMetaUser(session *LegacySession, addr *net.UDPAddr, pk
 		return h.handleMetaLogin(session, pkt, subData)
 	case 0x04CE, 0x04CF: // CMD_META_USER_LOGININFO, CMD_META_USER_LOGININFO2 - request own info after login
 		return h.handleMetaLoginInfo(session, pkt, subData)
-	case wire.ICQLegacyMetaSetBasic, wire.ICQLegacyMetaSetBasic2:
+	case ICQLegacyMetaSetBasic, ICQLegacyMetaSetBasic2:
 		return h.handleMetaSetBasic(session, pkt, subData)
-	case wire.ICQLegacyMetaSetWork, wire.ICQLegacyMetaSetWork2:
+	case ICQLegacyMetaSetWork, ICQLegacyMetaSetWork2:
 		return h.handleMetaSetWork(session, pkt, subData)
-	case wire.ICQLegacyMetaSetMore, wire.ICQLegacyMetaSetMore2:
+	case ICQLegacyMetaSetMore, ICQLegacyMetaSetMore2:
 		return h.handleMetaSetMore(session, pkt, subData)
-	case wire.ICQLegacyMetaSetAbout:
+	case ICQLegacyMetaSetAbout:
 		return h.handleMetaSetAbout(session, pkt, subData)
-	case wire.ICQLegacyMetaSetInterests:
+	case ICQLegacyMetaSetInterests:
 		return h.handleMetaSetInterests(session, pkt, subData)
-	case wire.ICQLegacyMetaSetAffiliations:
+	case ICQLegacyMetaSetAffiliations:
 		return h.handleMetaSetAffiliations(session, pkt, subData)
-	case wire.ICQLegacyMetaSetSecurity:
+	case ICQLegacyMetaSetSecurity:
 		return h.handleMetaSetSecurity(session, pkt, subData)
-	case wire.ICQLegacyMetaSetPass:
+	case ICQLegacyMetaSetPass:
 		return h.handleMetaSetPassword(session, pkt, subData)
-	case wire.ICQLegacyMetaSetHPCat:
+	case ICQLegacyMetaSetHPCat:
 		return h.handleMetaSetHPCat(session, pkt, subData)
-	case wire.ICQLegacyMetaUserUnreg:
+	case ICQLegacyMetaUserUnreg:
 		return h.handleMetaUnregister(session, pkt, subData)
-	case wire.ICQLegacyMetaUserFullInfo:
+	case ICQLegacyMetaUserFullInfo:
 		return h.handleMetaUserFullInfo(session, pkt, subData)
-	case wire.ICQLegacyMetaUserFullInfo2:
+	case ICQLegacyMetaUserFullInfo2:
 		return h.handleMetaUserFullInfo2(session, pkt, subData)
-	case wire.ICQLegacyMetaUserInfo:
+	case ICQLegacyMetaUserInfo:
 		return h.handleMetaUserInfo(session, pkt, subData)
-	case wire.ICQLegacyMetaSearchName, wire.ICQLegacyMetaSearchName2:
+	case ICQLegacyMetaSearchName, ICQLegacyMetaSearchName2:
 		return h.handleMetaSearchName(session, pkt, subData)
-	case wire.ICQLegacyMetaSearchUIN, wire.ICQLegacyMetaSearchUIN2:
+	case ICQLegacyMetaSearchUIN, ICQLegacyMetaSearchUIN2:
 		return h.handleMetaSearchUIN(session, pkt, subData)
-	case wire.ICQLegacyMetaSearchEmail, wire.ICQLegacyMetaSearchEmail2:
+	case ICQLegacyMetaSearchEmail, ICQLegacyMetaSearchEmail2:
 		return h.handleMetaSearchEmail(session, pkt, subData)
-	case wire.ICQLegacyMetaSearchWhite:
+	case ICQLegacyMetaSearchWhite:
 		return h.handleMetaSearchWhite(session, pkt, subData)
-	case wire.ICQLegacyMetaSearchWhite2:
+	case ICQLegacyMetaSearchWhite2:
 		return h.handleMetaSearchWhite2(session, pkt, subData)
 	default:
 		h.logger.Info("unhandled META_USER sub-command",
@@ -261,12 +260,12 @@ func (h *V5Handler) handleMetaUser(session *LegacySession, addr *net.UDPAddr, pk
 }
 
 // handleVisibleList processes a visible list update (V5)
-func (h *V5Handler) handleVisibleList(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleVisibleList(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
 
-	contactList, err := wire.ParseV2ContactList(pkt.Data)
+	contactList, err := ParseV2ContactList(pkt.Data)
 	if err != nil {
 		h.logger.Info("visible list parse failed", "uin", session.UIN, "err", err)
 		return h.sendV5Ack(session, pkt.SeqNum1)
@@ -278,12 +277,12 @@ func (h *V5Handler) handleVisibleList(session *LegacySession, pkt *wire.V5Client
 }
 
 // handleInvisibleList processes an invisible list update (V5)
-func (h *V5Handler) handleInvisibleList(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleInvisibleList(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
 
-	contactList, err := wire.ParseV2ContactList(pkt.Data)
+	contactList, err := ParseV2ContactList(pkt.Data)
 	if err != nil {
 		h.logger.Info("invisible list parse failed", "uin", session.UIN, "err", err)
 		return h.sendV5Ack(session, pkt.SeqNum1)
@@ -295,7 +294,7 @@ func (h *V5Handler) handleInvisibleList(session *LegacySession, pkt *wire.V5Clie
 }
 
 // handleChangeVILists processes a change to visible/invisible lists
-func (h *V5Handler) handleChangeVILists(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleChangeVILists(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -338,7 +337,7 @@ func (h *V5Handler) handleChangeVILists(session *LegacySession, pkt *wire.V5Clie
 // handleFirstLogin processes the first login packet (0x04EC)
 // This is sent before the actual login to set up the connection
 // From iserverd v5_process_firstlog()
-func (h *V5Handler) handleFirstLogin(session *LegacySession, addr *net.UDPAddr, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleFirstLogin(session *LegacySession, addr *net.UDPAddr, pkt *V5ClientPacket) error {
 	// Parse session_id2 from data (4 bytes at offset 0)
 	var sessionID2 uint32
 	if len(pkt.Data) >= 4 {
@@ -368,7 +367,7 @@ func (h *V5Handler) handleFirstLogin(session *LegacySession, addr *net.UDPAddr, 
 //
 // Refactored to use service layer (AuthenticateUser) and packet builder.
 // Following the OSCAR pattern: unmarshal -> call service -> build response
-func (h *V5Handler) handleGetDeps(session *LegacySession, addr *net.UDPAddr, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleGetDeps(session *LegacySession, addr *net.UDPAddr, pkt *V5ClientPacket) error {
 	ctx := context.Background()
 
 	// 1. Unmarshal packet to typed struct
@@ -411,7 +410,7 @@ func (h *V5Handler) handleGetDeps(session *LegacySession, addr *net.UDPAddr, pkt
 	authReq := AuthRequest{
 		UIN:      uin,
 		Password: password,
-		Version:  wire.ICQLegacyVersionV5,
+		Version:  ICQLegacyVersionV5,
 	}
 
 	authResult, err := h.service.AuthenticateUser(ctx, authReq)
@@ -443,7 +442,7 @@ func (h *V5Handler) handleGetDeps(session *LegacySession, addr *net.UDPAddr, pkt
 //
 // Refactored to use service layer (ProcessContactList) and packet builder.
 // Following the OSCAR pattern: unmarshal -> call service -> send notifications
-func (h *V5Handler) handleContactList(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleContactList(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -549,7 +548,7 @@ func (h *V5Handler) notifyContactsUserOnline(session *LegacySession) {
 }
 
 // handlePing processes keep-alive packets (0x042E, 0x051E)
-func (h *V5Handler) handlePing(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handlePing(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -557,7 +556,7 @@ func (h *V5Handler) handlePing(session *LegacySession, pkt *wire.V5ClientPacket)
 }
 
 // handleLogoff processes logout (0x0438)
-func (h *V5Handler) handleLogoff(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleLogoff(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -607,7 +606,7 @@ func (h *V5Handler) notifyContactsUserOffline(session *LegacySession) {
 //
 // Data format: STATUS(4)
 // - STATUS: Combined status value (low 16 bits = status, high 16 bits = extended status)
-func (h *V5Handler) handleSetStatus(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleSetStatus(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -699,7 +698,7 @@ func (h *V5Handler) broadcastStatusChangeToTargets(session *LegacySession, newSt
 //
 // Refactored to use service layer (ProcessMessage) and packet builder.
 // Following the OSCAR pattern: unmarshal -> call service -> route
-func (h *V5Handler) handleMessage(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleMessage(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -801,7 +800,7 @@ func (h *V5Handler) parseMessagePacket(data []byte, fromUIN uint32) (MessageRequ
 //
 // Refactored to use service layer (ProcessUserAdd) and packet builder.
 // Following the OSCAR pattern: unmarshal -> call service -> send notifications
-func (h *V5Handler) handleUserAdd(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleUserAdd(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -849,10 +848,10 @@ func (h *V5Handler) handleUserAdd(session *LegacySession, pkt *wire.V5ClientPack
 
 				if h.dispatcher != nil {
 					// Use dispatcher for cross-protocol support
-					h.dispatcher.SendOnlineMessage(targetSession, req.FromUIN, wire.ICQLegacyMsgAdded, youWereAddedMsg)
+					h.dispatcher.SendOnlineMessage(targetSession, req.FromUIN, ICQLegacyMsgAdded, youWereAddedMsg)
 				} else {
 					// Fallback to V5 format using packet builder
-					h.sender.SendToSession(targetSession, h.packetBuilder.BuildOnlineMessage(targetSession, req.FromUIN, wire.ICQLegacyMsgAdded, youWereAddedMsg))
+					h.sender.SendToSession(targetSession, h.packetBuilder.BuildOnlineMessage(targetSession, req.FromUIN, ICQLegacyMsgAdded, youWereAddedMsg))
 				}
 
 				// Also send the adder's online status to the target.
@@ -895,7 +894,7 @@ func (h *V5Handler) parseUserAddPacket(data []byte, fromUIN uint32) (UserAddRequ
 }
 
 // handleOfflineMsgReq processes offline message request (0x044C)
-func (h *V5Handler) handleOfflineMsgReq(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleOfflineMsgReq(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -934,7 +933,7 @@ func (h *V5Handler) handleOfflineMsgReq(session *LegacySession, pkt *wire.V5Clie
 // handleOfflineMsgAck processes offline message acknowledgment (0x0442)
 // From iserverd v5_process_sysmsg_delete() - client acknowledges receipt of offline messages
 // After receiving this, we delete the offline messages from the database
-func (h *V5Handler) handleOfflineMsgAck(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleOfflineMsgAck(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -955,7 +954,7 @@ func (h *V5Handler) handleOfflineMsgAck(session *LegacySession, pkt *wire.V5Clie
 
 // handleOldSearchUIN processes old-style search by UIN (0x041A)
 // From iserverd v5_process_old_srchuin()
-func (h *V5Handler) handleOldSearchUIN(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleOldSearchUIN(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -1001,7 +1000,7 @@ func (h *V5Handler) handleOldSearchUIN(session *LegacySession, pkt *wire.V5Clien
 
 // handleOldSearch processes old-style search by name/email (0x0424)
 // From iserverd v5_process_old_search()
-func (h *V5Handler) handleOldSearch(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleOldSearch(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -1016,7 +1015,7 @@ func (h *V5Handler) handleOldSearch(session *LegacySession, pkt *wire.V5ClientPa
 
 // handleOldInfoReq processes old-style info request (0x0460)
 // From iserverd v5_process_old_info()
-func (h *V5Handler) handleOldInfoReq(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleOldInfoReq(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -1060,7 +1059,7 @@ func (h *V5Handler) handleOldInfoReq(session *LegacySession, pkt *wire.V5ClientP
 
 // handleOldExtInfoReq processes old-style extended info request (0x046A)
 // From iserverd v5_process_old_info_ext()
-func (h *V5Handler) handleOldExtInfoReq(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleOldExtInfoReq(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -1099,7 +1098,7 @@ func (h *V5Handler) handleOldExtInfoReq(session *LegacySession, pkt *wire.V5Clie
 
 // handleAckNewUIN processes registration acknowledgment (0x03FC)
 // From iserverd v5_process_ack_new_uin()
-func (h *V5Handler) handleAckNewUIN(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleAckNewUIN(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -1117,7 +1116,7 @@ func (h *V5Handler) handleAckNewUIN(session *LegacySession, pkt *wire.V5ClientPa
 //
 // Refactored to use service layer (AuthenticateUser) and packet builder.
 // Following the OSCAR pattern: unmarshal -> call service -> build response
-func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *V5ClientPacket) error {
 	ctx := context.Background()
 
 	// 1. Send ACK first (iserverd does this immediately) using packet builder
@@ -1126,8 +1125,8 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 	// 2. Unmarshal packet to typed struct
 	// V5 login data format (verified against licq.5 CPU_Logon):
 	//   TIME(4) + TCP_PORT(4) + PWD_LEN(2) + PASSWORD + UNKNOWN(4, =0x98) +
-	//   REAL_IP(4) + MODE(1) + STATUS(4) + TCP_VERSION(4) + trailing(28 bytes)
-	// Note: STATUS and TCP_VERSION are both PackUnsignedLong (4 bytes each).
+	//   REAL_IP(4) + MODE(1) + STATUS(4) + DC_VERSION(4) + trailing(28 bytes)
+	// Note: STATUS and DC_VERSION are both PackUnsignedLong (4 bytes each).
 	if len(pkt.Data) < 10 {
 		h.logger.Debug("V5 login packet too short", "len", len(pkt.Data))
 		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(pkt.SessionID, pkt.UIN, pkt.SeqNum2))
@@ -1168,13 +1167,13 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 	// Parse additional fields if available
 	// V5 login data format (from licq.5 CPU_Logon):
 	//   TIME(4) + PORT(4) + PWD_LEN(2) + PASSWORD + UNKNOWN(4) + REAL_IP(4) +
-	//   MODE(1) + STATUS(4) + TCP_VERSION(4) + trailing(28 bytes)
+	//   MODE(1) + STATUS(4) + DC_VERSION(4) + trailing(28 bytes)
 	// Note: STATUS is PackUnsignedLong (4 bytes), NOT 2+2.
-	//       TCP_VERSION is PackUnsignedLong (4 bytes), NOT 2 bytes.
+	//       DC_VERSION is PackUnsignedLong (4 bytes), NOT 2 bytes.
 	var internalIP uint32
 	var dcType uint8
 	var status uint32
-	var tcpVersion uint32
+	var dcVersion uint32
 	if offset+4+4+1+4+4 <= len(pkt.Data) {
 		offset += 4 // skip unknown (0x98 constant)
 		internalIP = binary.LittleEndian.Uint32(pkt.Data[offset : offset+4])
@@ -1183,7 +1182,7 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 		offset++
 		status = binary.LittleEndian.Uint32(pkt.Data[offset : offset+4])
 		offset += 4
-		tcpVersion = binary.LittleEndian.Uint32(pkt.Data[offset : offset+4])
+		dcVersion = binary.LittleEndian.Uint32(pkt.Data[offset : offset+4])
 	}
 
 	h.logger.Info("V5 login attempt",
@@ -1193,7 +1192,7 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 		"internal_ip", fmt.Sprintf("0x%08X", internalIP),
 		"dc_type", dcType,
 		"status", fmt.Sprintf("0x%08X", status),
-		"tcp_version", tcpVersion,
+		"dc_version", dcVersion,
 		"data_len", len(pkt.Data),
 	)
 
@@ -1203,7 +1202,7 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 		Password: password,
 		Status:   status,
 		TCPPort:  port,
-		Version:  wire.ICQLegacyVersionV5,
+		Version:  ICQLegacyVersionV5,
 	}
 
 	authResult, err := h.service.AuthenticateUser(ctx, authReq)
@@ -1221,7 +1220,7 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 	}
 
 	// 4. Create session (handler responsibility - session management)
-	newSession, err := h.sessions.CreateSession(pkt.UIN, addr, wire.ICQLegacyVersionV5)
+	newSession, err := h.sessions.CreateSession(pkt.UIN, addr, ICQLegacyVersionV5)
 	if err != nil {
 		h.logger.Error("failed to create V5 session", "err", err, "uin", pkt.UIN)
 		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(pkt.SessionID, pkt.UIN, pkt.SeqNum2))
@@ -1233,7 +1232,7 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 	newSession.SetStatus(status)
 
 	// Store direct connection info for peer-to-peer
-	newSession.SetDirectConnectionInfo(port, internalIP, uint16(tcpVersion), dcType)
+	newSession.SetDirectConnectionInfo(port, internalIP, uint16(dcVersion), dcType)
 
 	// 5. Build and send response using packet builder
 	loginReplyPkt := h.packetBuilder.BuildLoginReply(newSession, pkt.SeqNum1, pkt.SeqNum2)
@@ -1251,16 +1250,16 @@ func (h *V5Handler) handleLogin(session *LegacySession, addr *net.UDPAddr, pkt *
 
 // sendV5BadPassword sends a bad password response
 func (h *V5Handler) sendV5BadPassword(addr *net.UDPAddr, sessionID uint32, uin uint32, seq2 uint16) error {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: sessionID,
-		Command:   wire.ICQLegacySrvWrongPasswd,
+		Command:   ICQLegacySrvWrongPasswd,
 		SeqNum1:   0,
 		SeqNum2:   seq2,
 		UIN:       uin,
 	}
 
-	data := wire.MarshalV5ServerPacket(pkt)
+	data := MarshalV5ServerPacket(pkt)
 	return h.sender.SendPacket(addr, data)
 }
 
@@ -1302,17 +1301,17 @@ func (h *V5Handler) sendV5LoginReply(session *LegacySession, seq2 uint16) error 
 	offset += 4
 	binary.LittleEndian.PutUint32(data[offset:], 0x80CDC19B) // server ID
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvHello,
+		Command:   ICQLegacySrvHello,
 		SeqNum1:   0,
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	h.logger.Debug("sending V5 login reply",
 		"uin", session.UIN,
@@ -1327,16 +1326,16 @@ func (h *V5Handler) sendV5LoginReply(session *LegacySession, seq2 uint16) error 
 
 // sendV5ContactListDone sends contact list processed response
 func (h *V5Handler) sendV5ContactListDone(session *LegacySession, seq2 uint16) error {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserListDone,
+		Command:   ICQLegacySrvUserListDone,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5UserOnline sends user online notification
@@ -1345,13 +1344,13 @@ func (h *V5Handler) sendV5ContactListDone(session *LegacySession, seq2 uint16) e
 // Verified against licq.5 client (icqd-udp.cpp ICQ_CMDxRCV_USERxONLINE):
 // Client reads: UIN(4) + IP(4) + PORT(2) + JUNK_SHORT(2) + REAL_IP(4) +
 //
-//	MODE(1) + STATUS(4) + TCP_VERSION(4)
+//	MODE(1) + STATUS(4) + DC_VERSION(4)
 //
 // Total client reads: 25 bytes. Extra bytes after that are ignored.
 //
 // Our packet format (49 bytes data, iserverd-compatible):
 //   - UIN(4) + IP(4) + TCP_PORT(4) + INT_IP(4) + DC_TYPE(1) +
-//     STATUS(2)+ESTAT(2) + TCPVER(4) + DC_COOKIE(4) + WEB_PORT(4) +
+//     STATUS(2)+ESTAT(2) + DCVER(4) + DC_COOKIE(4) + WEB_PORT(4) +
 //     CLI_FUTURES(4) + INFO_UTIME(4) + MORE_UTIME(4) + STAT_UTIME(4)
 func (h *V5Handler) sendV5UserOnline(session *LegacySession, uin uint32, status uint32) error {
 	data := make([]byte, 49)
@@ -1368,15 +1367,15 @@ func (h *V5Handler) sendV5UserOnline(session *LegacySession, uin uint32, status 
 	// V5 clients get real connection info for peer-to-peer
 	var externalIP, tcpPort, internalIP uint32
 	var dcType uint8
-	var tcpVersion uint32
+	var dcVersion uint32
 
-	if onlineSession != nil && onlineSession.Version == wire.ICQLegacyVersionV5 {
+	if onlineSession != nil && onlineSession.Version == ICQLegacyVersionV5 {
 		// V5 client - send real connection info for peer-to-peer
 		externalIP = onlineSession.GetExternalIP()
 		tcpPort = onlineSession.GetTCPPort()
 		internalIP = onlineSession.GetInternalIP()
 		dcType = onlineSession.DCType
-		tcpVersion = uint32(onlineSession.GetTCPVersion())
+		dcVersion = uint32(onlineSession.GetDCVersion())
 	}
 	// else: V3/V4 clients or unknown - keep zeros for privacy
 
@@ -1404,8 +1403,8 @@ func (h *V5Handler) sendV5UserOnline(session *LegacySession, uin uint32, status 
 	binary.LittleEndian.PutUint16(data[offset:], uint16(status>>16))
 	offset += 2
 
-	// TCP version
-	binary.LittleEndian.PutUint32(data[offset:], tcpVersion)
+	// DC version
+	binary.LittleEndian.PutUint32(data[offset:], dcVersion)
 	offset += 4
 
 	// DC cookie (not implemented - would need to be stored per session)
@@ -1432,10 +1431,10 @@ func (h *V5Handler) sendV5UserOnline(session *LegacySession, uin uint32, status 
 	binary.LittleEndian.PutUint32(data[offset:], 0)
 	offset += 4
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserOnline,
+		Command:   ICQLegacySrvUserOnline,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
@@ -1450,7 +1449,7 @@ func (h *V5Handler) sendV5UserOnline(session *LegacySession, uin uint32, status 
 		"tcp_port", tcpPort,
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5OfflineMessage sends an offline message to a V5 client
@@ -1492,10 +1491,10 @@ func (h *V5Handler) sendV5OfflineMessage(session *LegacySession, msg *LegacyOffl
 	offset += len(msgBytes)
 	data[offset] = 0 // null terminator
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSysMsgOffline, // 0x00DC
+		Command:   ICQLegacySrvSysMsgOffline, // 0x00DC
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
@@ -1509,21 +1508,21 @@ func (h *V5Handler) sendV5OfflineMessage(session *LegacySession, msg *LegacyOffl
 		"timestamp", msg.Timestamp,
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5OfflineMsgDone sends end of offline messages
 func (h *V5Handler) sendV5OfflineMsgDone(session *LegacySession, seq2 uint16) error {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSysMsgDone,
+		Command:   ICQLegacySrvSysMsgDone,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // META_USER sub-command handlers
@@ -1531,7 +1530,7 @@ func (h *V5Handler) sendV5OfflineMsgDone(session *LegacySession, seq2 uint16) er
 // handleMetaLogin handles CMD_META_LOGIN (0x07D0)
 // This is sent after login to get login meta info
 // From iserverd: v5_send_lmeta()
-func (h *V5Handler) handleMetaLogin(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaLogin(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
@@ -1546,7 +1545,7 @@ func (h *V5Handler) handleMetaLogin(session *LegacySession, pkt *wire.V5ClientPa
 // handleMetaLoginInfo handles CMD_META_USER_LOGININFO/LOGININFO2 (0x04CE/0x04CF)
 // This is sent after login to get the user's own info
 // From iserverd: v5_reply_metafullinfo_request2()
-func (h *V5Handler) handleMetaLoginInfo(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaLoginInfo(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
@@ -1591,49 +1590,49 @@ func (h *V5Handler) handleMetaLoginInfo(session *LegacySession, pkt *wire.V5Clie
 	return nil
 }
 
-func (h *V5Handler) handleMetaSetBasic(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetBasic(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set basic info", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update basic info
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetBasicAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetBasicAck)
 }
 
-func (h *V5Handler) handleMetaSetWork(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetWork(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set work info", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update work info
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetWorkAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetWorkAck)
 }
 
-func (h *V5Handler) handleMetaSetMore(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetMore(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set more info", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update more info
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetMoreAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetMoreAck)
 }
 
-func (h *V5Handler) handleMetaSetAbout(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetAbout(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set about", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update about text
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetAboutAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetAboutAck)
 }
 
-func (h *V5Handler) handleMetaSetInterests(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetInterests(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set interests", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update interests
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetInterestsAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetInterestsAck)
 }
 
-func (h *V5Handler) handleMetaSetAffiliations(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetAffiliations(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set affiliations", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update affiliations
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetAffilAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetAffilAck)
 }
 
-func (h *V5Handler) handleMetaSetSecurity(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetSecurity(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set security", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update security settings
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetSecureAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetSecureAck)
 }
 
-func (h *V5Handler) handleMetaSetPassword(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetPassword(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	ctx := context.Background()
 
 	// Parse password from data
@@ -1641,7 +1640,7 @@ func (h *V5Handler) handleMetaSetPassword(session *LegacySession, pkt *wire.V5Cl
 	// From iserverd v5_set_password(): v5_extract_string(password, int_pack, 32, "password", user)
 	if len(data) < 2 {
 		h.logger.Info("META set password - data too short", "uin", pkt.UIN, "data_len", len(data))
-		return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetPassAck)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetPassAck)
 	}
 
 	offset := 0
@@ -1658,7 +1657,7 @@ func (h *V5Handler) handleMetaSetPassword(session *LegacySession, pkt *wire.V5Cl
 	// Read new password
 	if offset+int(pwdLen) > len(data) {
 		h.logger.Info("META set password - password truncated", "uin", pkt.UIN)
-		return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetPassAck)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetPassAck)
 	}
 	newPassword := string(data[offset : offset+int(pwdLen)])
 	// Remove null terminator if present
@@ -1683,20 +1682,20 @@ func (h *V5Handler) handleMetaSetPassword(session *LegacySession, pkt *wire.V5Cl
 		h.logger.Info("META password updated successfully", "uin", pkt.UIN)
 	}
 
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetPassAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetPassAck)
 }
 
 // handleMetaSetHPCat processes set homepage category (0x0442)
 // From iserverd v5_set_hpcat_info()
-func (h *V5Handler) handleMetaSetHPCat(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSetHPCat(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	h.logger.Info("META set homepage category", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
 	// TODO: Parse and update homepage category
-	return h.sendMetaAck(session, pkt.SeqNum2, wire.ICQLegacySrvMetaSetHPCatAck)
+	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetHPCatAck)
 }
 
 // handleMetaUnregister processes unregister account (0x04C4)
 // From iserverd v5_unregister_user()
-func (h *V5Handler) handleMetaUnregister(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaUnregister(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	ctx := context.Background()
 
 	// Parse password from data
@@ -1755,14 +1754,14 @@ func (h *V5Handler) handleMetaUnregister(session *LegacySession, pkt *wire.V5Cli
 // Sends 7 separate META_USER packets using the older format functions:
 // info2, more, hpage_cat, work, about, interests, affiliations
 // This matches iserverd's v5_reply_metafullinfo_request() exactly.
-func (h *V5Handler) handleMetaUserFullInfo(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaUserFullInfo(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
 
 	if len(data) < 4 {
 		h.logger.Info("META user full info - data too short", "uin", pkt.UIN)
-		return h.sendMetaFail(session, pkt.SeqNum2, wire.ICQLegacySrvMetaUserInfo2)
+		return h.sendMetaFail(session, pkt.SeqNum2, ICQLegacySrvMetaUserInfo2)
 	}
 
 	targetUIN := binary.LittleEndian.Uint32(data[0:4])
@@ -1775,7 +1774,7 @@ func (h *V5Handler) handleMetaUserFullInfo(session *LegacySession, pkt *wire.V5C
 	info, err := h.service.GetUserInfo(ctx, targetUIN)
 	if err != nil || info == nil {
 		h.logger.Info("META user full info - NOT FOUND", "target_uin", targetUIN, "err", err)
-		return h.sendMetaFail(session, pkt.SeqNum2, wire.ICQLegacySrvMetaUserInfo2)
+		return h.sendMetaFail(session, pkt.SeqNum2, ICQLegacySrvMetaUserInfo2)
 	}
 
 	h.logger.Info("META user full info - FOUND, sending 7 info packets (older format)",
@@ -1802,14 +1801,14 @@ func (h *V5Handler) handleMetaUserFullInfo(session *LegacySession, pkt *wire.V5C
 // Sends 7 separate META_USER packets using the newer format functions:
 // info3, more2, hpage_cat, work2, about, interests, affiliations
 // This matches iserverd's v5_reply_metafullinfo_request2() exactly.
-func (h *V5Handler) handleMetaUserFullInfo2(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaUserFullInfo2(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
 
 	if len(data) < 4 {
 		h.logger.Info("META user full info2 - data too short", "uin", pkt.UIN)
-		return h.sendMetaFail(session, pkt.SeqNum2, wire.ICQLegacySrvMetaUserInfo2)
+		return h.sendMetaFail(session, pkt.SeqNum2, ICQLegacySrvMetaUserInfo2)
 	}
 
 	targetUIN := binary.LittleEndian.Uint32(data[0:4])
@@ -1822,7 +1821,7 @@ func (h *V5Handler) handleMetaUserFullInfo2(session *LegacySession, pkt *wire.V5
 	info, err := h.service.GetUserInfo(ctx, targetUIN)
 	if err != nil || info == nil {
 		h.logger.Info("META user full info2 - NOT FOUND", "target_uin", targetUIN, "err", err)
-		return h.sendMetaFail(session, pkt.SeqNum2, wire.ICQLegacySrvMetaUserInfo2)
+		return h.sendMetaFail(session, pkt.SeqNum2, ICQLegacySrvMetaUserInfo2)
 	}
 
 	h.logger.Info("META user full info2 - FOUND, sending 7 info packets (newer format)",
@@ -1849,14 +1848,14 @@ func (h *V5Handler) handleMetaUserFullInfo2(session *LegacySession, pkt *wire.V5
 // Unlike handleMetaUserFullInfo/handleMetaUserFullInfo2, this sends only a
 // single short user info packet (SRV_META_USER_INFO = 0x0104).
 // This matches iserverd's v5_send_meta_info() exactly.
-func (h *V5Handler) handleMetaUserInfo(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaUserInfo(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
 
 	if len(data) < 4 {
 		h.logger.Info("META user info - data too short", "uin", pkt.UIN)
-		return h.sendMetaFail(session, pkt.SeqNum2, wire.ICQLegacySrvMetaUserInfo)
+		return h.sendMetaFail(session, pkt.SeqNum2, ICQLegacySrvMetaUserInfo)
 	}
 
 	targetUIN := binary.LittleEndian.Uint32(data[0:4])
@@ -1891,7 +1890,7 @@ func (h *V5Handler) handleMetaUserInfo(session *LegacySession, pkt *wire.V5Clien
 //
 // Note: iserverd's variable naming is confusing - it reads into first_str, last_str,
 // nick_str but the actual packet order from the client is nick, first, last.
-func (h *V5Handler) handleMetaSearchName(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSearchName(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
@@ -1958,7 +1957,7 @@ func (h *V5Handler) handleMetaSearchName(session *LegacySession, pkt *wire.V5Cli
 //
 // Refactored to use service layer (GetUserInfoForProtocol) and packet builder.
 // Following the OSCAR pattern: unmarshal -> call service -> build response
-func (h *V5Handler) handleMetaSearchUIN(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSearchUIN(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
@@ -2011,7 +2010,7 @@ func (h *V5Handler) handleMetaSearchUIN(session *LegacySession, pkt *wire.V5Clie
 //
 // Packet format (subData after sub_command):
 //   - Email string (length-prefixed, null-terminated)
-func (h *V5Handler) handleMetaSearchEmail(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSearchEmail(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
@@ -2090,7 +2089,7 @@ func (h *V5Handler) handleMetaSearchEmail(session *LegacySession, pkt *wire.V5Cl
 //   - Affiliation index (uint16)
 //   - Affiliation keywords (length-prefixed string)
 //   - Online only (uint8)
-func (h *V5Handler) handleMetaSearchWhite(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSearchWhite(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
@@ -2315,7 +2314,7 @@ func (h *V5Handler) handleMetaSearchWhite(session *LegacySession, pkt *wire.V5Cl
 //   - Homepage category index (uint16) - EXTRA field in White2
 //   - Homepage keywords (length-prefixed string) - EXTRA field in White2
 //   - Online only (uint8)
-func (h *V5Handler) handleMetaSearchWhite2(session *LegacySession, pkt *wire.V5ClientPacket, data []byte) error {
+func (h *V5Handler) handleMetaSearchWhite2(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
 	if session == nil {
 		return nil
 	}
@@ -2523,9 +2522,9 @@ func (h *V5Handler) sendMetaWhiteSearchResult2(session *LegacySession, seqNum ui
 	}
 
 	// Use White2 response codes (0x01A4 for found, 0x01AE for last found)
-	subCommand := wire.ICQLegacySrvMetaWhiteFound // 0x01A4
+	subCommand := ICQLegacySrvMetaWhiteFound // 0x01A4
 	if isLast {
-		subCommand = wire.ICQLegacySrvMetaWhiteLastFound // 0x01AE
+		subCommand = ICQLegacySrvMetaWhiteLastFound // 0x01AE
 	}
 
 	buf := new(bytes.Buffer)
@@ -2558,17 +2557,17 @@ func (h *V5Handler) sendMetaWhiteSearchResult2(session *LegacySession, seqNum ui
 		binary.Write(buf, binary.LittleEndian, uint32(0)) // users_left
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seqNum,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	if result != nil {
 		h.logger.Info("sending META white search 2 result",
@@ -2610,9 +2609,9 @@ func (h *V5Handler) sendMetaWhiteFound(session *LegacySession, seqNum uint16, re
 	}
 
 	// Use White response codes (0x01A4 for found, 0x01AE for last found)
-	subCommand := wire.ICQLegacySrvMetaWhiteFound // 0x01A4
+	subCommand := ICQLegacySrvMetaWhiteFound // 0x01A4
 	if isLast {
-		subCommand = wire.ICQLegacySrvMetaWhiteLastFound // 0x01AE
+		subCommand = ICQLegacySrvMetaWhiteLastFound // 0x01AE
 	}
 
 	buf := new(bytes.Buffer)
@@ -2646,17 +2645,17 @@ func (h *V5Handler) sendMetaWhiteFound(session *LegacySession, seqNum uint16, re
 		}
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seqNum,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	if result != nil {
 		h.logger.Info("sending META white search result",
@@ -2679,7 +2678,7 @@ func (h *V5Handler) sendMetaWhiteSearchEnd(session *LegacySession, seqNum uint16
 		return nil
 	}
 
-	subCommand := wire.ICQLegacySrvMetaWhiteLastFound // 0x01AE
+	subCommand := ICQLegacySrvMetaWhiteLastFound // 0x01AE
 
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, subCommand)
@@ -2691,10 +2690,10 @@ func (h *V5Handler) sendMetaWhiteSearchEnd(session *LegacySession, seqNum uint16
 	}
 	binary.Write(buf, binary.LittleEndian, uint32(0)) // users_left
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seqNum,
 		UIN:       session.UIN,
@@ -2706,24 +2705,24 @@ func (h *V5Handler) sendMetaWhiteSearchEnd(session *LegacySession, seqNum uint16
 		"success", success,
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // Response helpers
 
 // sendV5AckToAddr sends a V5 ACK to a specific address (for pre-login packets)
 func (h *V5Handler) sendV5AckToAddr(addr *net.UDPAddr, sessionID uint32, uin uint32, seq1, seq2 uint16) error {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: sessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seq1,
 		SeqNum2:   seq2,
 		UIN:       uin,
 	}
 
 	// Server packets are NOT encrypted
-	data := wire.MarshalV5ServerPacket(pkt)
+	data := MarshalV5ServerPacket(pkt)
 	return h.sender.SendPacket(addr, data)
 }
 
@@ -2732,15 +2731,15 @@ func (h *V5Handler) sendV5AckToAddr(addr *net.UDPAddr, sessionID uint32, uin uin
 // From licq.5 source: ICQ_CMDxRCV_ERROR (0x00F0) triggers icqRelogon()
 // with message "Server says you are not logged on."
 func (h *V5Handler) sendV5NotConnected(addr *net.UDPAddr, sessionID uint32, uin uint32, seq1, seq2 uint16) error {
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: sessionID,
-		Command:   wire.ICQLegacySrvNotConnected,
+		Command:   ICQLegacySrvNotConnected,
 		SeqNum1:   seq1,
 		SeqNum2:   seq2,
 		UIN:       uin,
 	}
-	return h.sender.SendPacket(addr, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendPacket(addr, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5FirstLoginReply sends the first login ACK response
@@ -2753,17 +2752,17 @@ func (h *V5Handler) sendV5FirstLoginReply(addr *net.UDPAddr, sessionID uint32, u
 	binary.LittleEndian.PutUint32(data[1:5], sessionID2)
 	binary.LittleEndian.PutUint16(data[5:7], 0x0001)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: sessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seq1,
 		SeqNum2:   seq2,
 		UIN:       uin,
 		Data:      data,
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 	return h.sender.SendPacket(addr, packetData)
 }
 
@@ -2775,8 +2774,8 @@ func (h *V5Handler) sendV5DepsListReply(addr *net.UDPAddr, uin uint32, seq2 uint
 	// V3 format packet: VERSION(2) + COMMAND(2) + SEQ1(2) + SEQ2(2) + UIN(4) + CHECKSUM(4)
 	// Command is 0x0032 (pre-auth response)
 	buf := make([]byte, 16)
-	binary.LittleEndian.PutUint16(buf[0:2], wire.ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(buf[2:4], wire.ICQLegacySrvUserDepsList)
+	binary.LittleEndian.PutUint16(buf[0:2], ICQLegacyVersionV3)
+	binary.LittleEndian.PutUint16(buf[2:4], ICQLegacySrvUserDepsList)
 	binary.LittleEndian.PutUint16(buf[4:6], 0x0000) // seq1
 	binary.LittleEndian.PutUint16(buf[6:8], seq2)
 	binary.LittleEndian.PutUint32(buf[8:12], uin)
@@ -2796,17 +2795,17 @@ func (h *V5Handler) sendV5Ack(session *LegacySession, seqNum uint16) error {
 	}
 
 	// ACK echoes the client's seq1, and uses 0 for seq2 (as per iserverd)
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seqNum,
 		SeqNum2:   0, // ACKs use 0 for seq2
 		UIN:       session.UIN,
 	}
 
 	// Server packets are NOT encrypted
-	data := wire.MarshalV5ServerPacket(pkt)
+	data := MarshalV5ServerPacket(pkt)
 	return h.sender.SendToSession(session, data)
 }
 
@@ -2816,16 +2815,16 @@ func (h *V5Handler) sendV5AckWithSeq2(session *LegacySession, seq1, seq2 uint16)
 		return nil
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvAck,
+		Command:   ICQLegacySrvAck,
 		SeqNum1:   seq1,
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 	}
 
-	data := wire.MarshalV5ServerPacket(pkt)
+	data := MarshalV5ServerPacket(pkt)
 	return h.sender.SendToSession(session, data)
 }
 
@@ -2839,10 +2838,10 @@ func (h *V5Handler) sendMetaAck(session *LegacySession, seq2 uint16, subCommand 
 	binary.LittleEndian.PutUint16(metaData[0:2], subCommand)
 	metaData[2] = 0x0A // Success
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
@@ -2850,7 +2849,7 @@ func (h *V5Handler) sendMetaAck(session *LegacySession, seq2 uint16, subCommand 
 	}
 
 	// Server packets are NOT encrypted
-	data := wire.MarshalV5ServerPacket(pkt)
+	data := MarshalV5ServerPacket(pkt)
 	return h.sender.SendToSession(session, data)
 }
 
@@ -2864,17 +2863,17 @@ func (h *V5Handler) sendMetaUnregAck(session *LegacySession, seq2 uint16, succes
 
 	// Build META response
 	metaData := make([]byte, 3)
-	binary.LittleEndian.PutUint16(metaData[0:2], wire.ICQLegacySrvMetaUnregAck)
+	binary.LittleEndian.PutUint16(metaData[0:2], ICQLegacySrvMetaUnregAck)
 	if success {
 		metaData[2] = 0x0A // Success
 	} else {
 		metaData[2] = 0x32 // Failure
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
@@ -2887,7 +2886,7 @@ func (h *V5Handler) sendMetaUnregAck(session *LegacySession, seq2 uint16, succes
 	)
 
 	// Server packets are NOT encrypted
-	data := wire.MarshalV5ServerPacket(pkt)
+	data := MarshalV5ServerPacket(pkt)
 	return h.sender.SendToSession(session, data)
 }
 
@@ -2904,10 +2903,10 @@ func (h *V5Handler) sendMetaLoginReply(session *LegacySession, seq2 uint16) erro
 	binary.LittleEndian.PutUint16(metaData[2:4], 0x0000) // unknown
 	binary.LittleEndian.PutUint16(metaData[4:6], 0x0046) // unknown (70 decimal)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
@@ -2919,7 +2918,7 @@ func (h *V5Handler) sendMetaLoginReply(session *LegacySession, seq2 uint16) erro
 		"seq2", seq2,
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaFail sends a META fail response
@@ -2932,17 +2931,17 @@ func (h *V5Handler) sendMetaFail(session *LegacySession, seq2 uint16, subCommand
 	binary.Write(buf, binary.LittleEndian, subCommand)
 	buf.WriteByte(0x32) // fail
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaInfo3 sends basic user info (SRV_META_USER_INFO2 = 0x00C8)
@@ -2976,17 +2975,17 @@ func (h *V5Handler) sendMetaInfo3(session *LegacySession, seq2 uint16, info *Leg
 	buf.WriteByte(0x00)                               // unknown
 	buf.WriteByte(0x00)                               // unknown
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaMore sends more user info (SRV_META_INFO_MORE = 0x00DC)
@@ -3024,29 +3023,29 @@ func (h *V5Handler) sendMetaMore(session *LegacySession, seq2 uint16, info *Lega
 	}
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, wire.ICQLegacySrvMetaInfoMore) // SRV_META_INFO_MORE = 0x00DC
-	buf.WriteByte(0x0A)                                                   // success
-	binary.Write(buf, binary.LittleEndian, uint16(info.Age))              // age(2)
-	buf.WriteByte(info.Gender)                                            // gender(1)
-	writeLegacyString(buf, info.Homepage)                                 // homepage_len(2) + homepage
-	buf.WriteByte(tempYear)                                               // byear(1) - year minus 1900
-	buf.WriteByte(info.BirthMonth)                                        // bmonth(1)
-	buf.WriteByte(info.BirthDay)                                          // bday(1)
-	buf.WriteByte(info.Lang1)                                             // lang1(1)
-	buf.WriteByte(info.Lang2)                                             // lang2(1)
-	buf.WriteByte(info.Lang3)                                             // lang3(1)
+	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaInfoMore) // SRV_META_INFO_MORE = 0x00DC
+	buf.WriteByte(0x0A)                                              // success
+	binary.Write(buf, binary.LittleEndian, uint16(info.Age))         // age(2)
+	buf.WriteByte(info.Gender)                                       // gender(1)
+	writeLegacyString(buf, info.Homepage)                            // homepage_len(2) + homepage
+	buf.WriteByte(tempYear)                                          // byear(1) - year minus 1900
+	buf.WriteByte(info.BirthMonth)                                   // bmonth(1)
+	buf.WriteByte(info.BirthDay)                                     // bday(1)
+	buf.WriteByte(info.Lang1)                                        // lang1(1)
+	buf.WriteByte(info.Lang2)                                        // lang2(1)
+	buf.WriteByte(info.Lang3)                                        // lang3(1)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaMore2 sends more user info (SRV_META_INFO_MORE = 0x00DC)
@@ -3075,29 +3074,29 @@ func (h *V5Handler) sendMetaMore2(session *LegacySession, seq2 uint16, info *Leg
 	}
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, wire.ICQLegacySrvMetaInfoMore) // SRV_META_INFO_MORE = 0x00DC
-	buf.WriteByte(0x0A)                                                   // success
-	binary.Write(buf, binary.LittleEndian, uint16(info.Age))              // age(2)
-	buf.WriteByte(info.Gender)                                            // gender(1)
-	writeLegacyString(buf, info.Homepage)                                 // homepage_len(2) + homepage
-	binary.Write(buf, binary.LittleEndian, uint16(info.BirthYear))        // byear(2) - full year
-	buf.WriteByte(info.BirthMonth)                                        // bmonth(1)
-	buf.WriteByte(info.BirthDay)                                          // bday(1)
-	buf.WriteByte(info.Lang1)                                             // lang1(1)
-	buf.WriteByte(info.Lang2)                                             // lang2(1)
-	buf.WriteByte(info.Lang3)                                             // lang3(1)
+	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaInfoMore) // SRV_META_INFO_MORE = 0x00DC
+	buf.WriteByte(0x0A)                                              // success
+	binary.Write(buf, binary.LittleEndian, uint16(info.Age))         // age(2)
+	buf.WriteByte(info.Gender)                                       // gender(1)
+	writeLegacyString(buf, info.Homepage)                            // homepage_len(2) + homepage
+	binary.Write(buf, binary.LittleEndian, uint16(info.BirthYear))   // byear(2) - full year
+	buf.WriteByte(info.BirthMonth)                                   // bmonth(1)
+	buf.WriteByte(info.BirthDay)                                     // bday(1)
+	buf.WriteByte(info.Lang1)                                        // lang1(1)
+	buf.WriteByte(info.Lang2)                                        // lang2(1)
+	buf.WriteByte(info.Lang3)                                        // lang3(1)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaHpageCat sends homepage category info (SRV_META_INFO_HPAGE_CAT = 0x010E)
@@ -3115,17 +3114,17 @@ func (h *V5Handler) sendMetaHpageCat(session *LegacySession, seq2 uint16, info *
 	writeLegacyString(buf, "")                             // hpage_txt
 	buf.WriteByte(0x00)                                    // unknown
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaWork sends work info (SRV_META_INFO_WORK = 0x00D2)
@@ -3153,17 +3152,17 @@ func (h *V5Handler) sendMetaWork(session *LegacySession, seq2 uint16, info *Lega
 	binary.Write(buf, binary.LittleEndian, uint16(0))      // wocup (occupation code)
 	writeLegacyString(buf, "")                             // wpage (work webpage)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaWork2 sends work info (SRV_META_INFO_WORK = 0x00D2)
@@ -3191,17 +3190,17 @@ func (h *V5Handler) sendMetaWork2(session *LegacySession, seq2 uint16, info *Leg
 	binary.Write(buf, binary.LittleEndian, uint16(0))      // wocup (occupation code)
 	writeLegacyString(buf, "")                             // wpage (work webpage)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaAbout sends about/notes info (SRV_META_INFO_ABOUT = 0x00E6)
@@ -3216,17 +3215,17 @@ func (h *V5Handler) sendMetaAbout(session *LegacySession, seq2 uint16, info *Leg
 	buf.WriteByte(0x0A)                                    // success
 	writeLegacyString(buf, "")                             // notes
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaInterests sends interests info (SRV_META_INFO_INTERESTS = 0x00F0)
@@ -3241,17 +3240,17 @@ func (h *V5Handler) sendMetaInterests(session *LegacySession, seq2 uint16, info 
 	buf.WriteByte(0x0A)                                    // success
 	buf.WriteByte(0x00)                                    // int_num (0 interests)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaAffiliations sends affiliations info (SRV_META_INFO_AFFILATIONS = 0x00FA)
@@ -3285,17 +3284,17 @@ func (h *V5Handler) sendMetaAffiliations(session *LegacySession, seq2 uint16, in
 	binary.Write(buf, binary.LittleEndian, uint16(0x0001))
 	buf.WriteByte(0x00)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaFullUserInfo sends full user info response (legacy, kept for compatibility)
@@ -3317,10 +3316,10 @@ func (h *V5Handler) sendMetaFullUserInfo(session *LegacySession, seq2 uint16, in
 	writeLegacyString(buf, info.Email)
 	buf.WriteByte(0) // auth
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
@@ -3332,7 +3331,7 @@ func (h *V5Handler) sendMetaFullUserInfo(session *LegacySession, seq2 uint16, in
 		"target", info.UIN,
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendMetaUserInfo sends a META user info response
@@ -3356,7 +3355,7 @@ func (h *V5Handler) sendMetaUserInfo(session *LegacySession, seqNum uint16, info
 	buf := new(bytes.Buffer)
 
 	// SubCommand: SRV_META_USER_INFO (0x0104)
-	binary.Write(buf, binary.LittleEndian, wire.ICQLegacySrvMetaUserInfo)
+	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaUserInfo)
 
 	if info != nil {
 		// Success byte: 0x0A
@@ -3388,21 +3387,21 @@ func (h *V5Handler) sendMetaUserInfo(session *LegacySession, seqNum uint16, info
 		buf.WriteByte(0x32)
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seqNum,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	h.logger.Info("sending META user info",
 		"uin", session.UIN,
-		"sub_command", fmt.Sprintf("0x%04X", wire.ICQLegacySrvMetaUserInfo),
+		"sub_command", fmt.Sprintf("0x%04X", ICQLegacySrvMetaUserInfo),
 		"target_uin", info.UIN,
 		"nickname", info.Nickname,
 		"firstname", info.FirstName,
@@ -3451,7 +3450,7 @@ func (h *V5Handler) sendMetaUserInfo2(session *LegacySession, seqNum uint16, inf
 	buf := new(bytes.Buffer)
 
 	// SubCommand: SRV_META_USER_INFO2 (0x00C8)
-	binary.Write(buf, binary.LittleEndian, wire.ICQLegacySrvMetaUserInfo2)
+	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaUserInfo2)
 
 	if info != nil {
 		// Success byte: 0x0A
@@ -3522,21 +3521,21 @@ func (h *V5Handler) sendMetaUserInfo2(session *LegacySession, seqNum uint16, inf
 		buf.WriteByte(0x32)
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seqNum,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	h.logger.Info("sending META user info2 (home info)",
 		"uin", session.UIN,
-		"sub_command", fmt.Sprintf("0x%04X", wire.ICQLegacySrvMetaUserInfo2),
+		"sub_command", fmt.Sprintf("0x%04X", ICQLegacySrvMetaUserInfo2),
 		"target_uin", info.UIN,
 		"nickname", info.Nickname,
 		"firstname", info.FirstName,
@@ -3587,7 +3586,7 @@ func (h *V5Handler) sendMetaUserInfo3(session *LegacySession, seqNum uint16, inf
 	buf := new(bytes.Buffer)
 
 	// SubCommand: SRV_META_USER_INFO2 (0x00C8) - same as info2
-	binary.Write(buf, binary.LittleEndian, wire.ICQLegacySrvMetaUserInfo2)
+	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaUserInfo2)
 
 	if info != nil {
 		// Success byte: 0x0A
@@ -3659,21 +3658,21 @@ func (h *V5Handler) sendMetaUserInfo3(session *LegacySession, seqNum uint16, inf
 		buf.WriteByte(0x32)
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seqNum,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	h.logger.Info("sending META user info3 (home info for ICQ99b)",
 		"uin", session.UIN,
-		"sub_command", fmt.Sprintf("0x%04X", wire.ICQLegacySrvMetaUserInfo2),
+		"sub_command", fmt.Sprintf("0x%04X", ICQLegacySrvMetaUserInfo2),
 		"target_uin", info.UIN,
 		"nickname", info.Nickname,
 		"firstname", info.FirstName,
@@ -3728,17 +3727,17 @@ func (h *V5Handler) sendMetaSearchResult(session *LegacySession, seqNum uint16, 
 		}
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvMetaUser,
+		Command:   ICQLegacySrvMetaUser,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seqNum,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	if result != nil {
 		h.logger.Info("sending META search result",
@@ -3792,17 +3791,17 @@ func (h *V5Handler) sendV5OldSearchFound(session *LegacySession, seq2 uint16, re
 	buf.WriteByte(result.AuthRequired) // auth - from iserverd tuser.auth
 	buf.WriteByte(0)                   // unknown trailing byte (as per iserverd)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSearchFound,
+		Command:   ICQLegacySrvSearchFound,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5OldSearchEnd sends old-style search end marker
@@ -3826,17 +3825,17 @@ func (h *V5Handler) sendV5OldSearchEnd(session *LegacySession, seq2 uint16, more
 		moreByte = 0x00
 	}
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSearchDone,
+		Command:   ICQLegacySrvSearchDone,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   seq2,
 		UIN:       session.UIN,
 		Data:      []byte{moreByte},
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5OldStyleInfo sends old-style basic info response
@@ -3868,17 +3867,17 @@ func (h *V5Handler) sendV5OldStyleInfo(session *LegacySession, info *LegacyUserS
 
 	seqNum := session.NextServerSeqNum()
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvInfoReply,
+		Command:   ICQLegacySrvInfoReply,
 		SeqNum1:   seqNum,
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      buf.Bytes(),
 	}
 
-	packetData := wire.MarshalV5ServerPacket(pkt)
+	packetData := MarshalV5ServerPacket(pkt)
 
 	h.logger.Debug("sending V5 old style info",
 		"uin", session.UIN,
@@ -3943,10 +3942,10 @@ func (h *V5Handler) sendV5OldStyleInfoExt(session *LegacySession, targetUIN uint
 	writeLegacyString(buf, notes)                    // about/notes (length-prefixed with null terminator)
 	binary.Write(buf, binary.LittleEndian, zipCode)  // zip code (uint32, client reads as UnpackUnsignedLong)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvExtInfoReply,
+		Command:   ICQLegacySrvExtInfoReply,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
@@ -3968,7 +3967,7 @@ func (h *V5Handler) sendV5OldStyleInfoExt(session *LegacySession, targetUIN uint
 		"zip_code", zipCode,
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5InvalidUIN sends invalid UIN response
@@ -3983,17 +3982,17 @@ func (h *V5Handler) sendV5InvalidUIN(session *LegacySession, uin uint32) error {
 	data := make([]byte, 4)
 	binary.LittleEndian.PutUint32(data[0:4], uin)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvInvalidUIN,
+		Command:   ICQLegacySrvInvalidUIN,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // writeLegacyString writes a length-prefixed string to a buffer
@@ -4025,7 +4024,7 @@ func readLPString(data []byte, offset int) (string, int) {
 
 // handleDirectWhiteSearch handles white pages search sent directly (0x0532/0x0533)
 // Some older clients send META search commands directly instead of wrapped in META_USER
-func (h *V5Handler) handleDirectWhiteSearch(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleDirectWhiteSearch(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -4039,7 +4038,7 @@ func (h *V5Handler) handleDirectWhiteSearch(session *LegacySession, pkt *wire.V5
 }
 
 // handleDirectNameSearch handles name search sent directly (0x0514/0x0515)
-func (h *V5Handler) handleDirectNameSearch(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleDirectNameSearch(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -4082,7 +4081,7 @@ func (h *V5Handler) handleDirectNameSearch(session *LegacySession, pkt *wire.V5C
 }
 
 // handleDirectUINSearch handles UIN search sent directly (0x051E/0x051F)
-func (h *V5Handler) handleDirectUINSearch(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleDirectUINSearch(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -4123,7 +4122,7 @@ func (h *V5Handler) handleDirectUINSearch(session *LegacySession, pkt *wire.V5Cl
 }
 
 // handleDirectEmailSearch handles email search sent directly (0x0528/0x0529)
-func (h *V5Handler) handleDirectEmailSearch(session *LegacySession, pkt *wire.V5ClientPacket) error {
+func (h *V5Handler) handleDirectEmailSearch(session *LegacySession, pkt *V5ClientPacket) error {
 	if session == nil {
 		return nil
 	}
@@ -4190,17 +4189,17 @@ func (h *V5Handler) sendOnlineMessage(session *LegacySession, fromUIN uint32, ms
 	offset += len(msgBytes)
 	data[offset] = 0 // null terminator
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvSysMsgOnline, // 0x0104
+		Command:   ICQLegacySrvSysMsgOnline, // 0x0104
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
 		Data:      data,
 	}
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5UserOffline sends user offline notification
@@ -4210,10 +4209,10 @@ func (h *V5Handler) sendV5UserOffline(session *LegacySession, uin uint32) error 
 	data := make([]byte, 4)
 	binary.LittleEndian.PutUint32(data[0:4], uin)
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserOffline,
+		Command:   ICQLegacySrvUserOffline,
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
@@ -4225,7 +4224,7 @@ func (h *V5Handler) sendV5UserOffline(session *LegacySession, uin uint32) error 
 		"offline_uin", uin,
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }
 
 // sendV5UserStatus sends user status change notification
@@ -4251,10 +4250,10 @@ func (h *V5Handler) sendV5UserStatus(session *LegacySession, uin uint32, status 
 	binary.LittleEndian.PutUint16(data[offset:], uint16(status>>16))
 	offset += 2
 
-	pkt := &wire.V5ServerPacket{
-		Version:   wire.ICQLegacyVersionV5,
+	pkt := &V5ServerPacket{
+		Version:   ICQLegacyVersionV5,
 		SessionID: session.SessionID,
-		Command:   wire.ICQLegacySrvUserStatus, // 0x01A4
+		Command:   ICQLegacySrvUserStatus, // 0x01A4
 		SeqNum1:   session.NextServerSeqNum(),
 		SeqNum2:   0,
 		UIN:       session.UIN,
@@ -4267,5 +4266,5 @@ func (h *V5Handler) sendV5UserStatus(session *LegacySession, uin uint32, status 
 		"status", fmt.Sprintf("0x%08X", status),
 	)
 
-	return h.sender.SendToSession(session, wire.MarshalV5ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV5ServerPacket(pkt))
 }

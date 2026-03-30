@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/mk6i/open-oscar-server/config"
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 const (
@@ -188,7 +187,7 @@ func (s *LegacyServer) receiveLoop(ctx context.Context) {
 // handlePacket processes a single incoming packet
 func (s *LegacyServer) handlePacket(addr *net.UDPAddr, packet []byte) {
 	// Detect protocol version
-	version, err := wire.DetectProtocolVersion(packet)
+	version, err := DetectProtocolVersion(packet)
 	if err != nil {
 		s.logger.Debug("failed to detect protocol version",
 			"err", err,

@@ -30,7 +30,7 @@ func TestICQLegacyService_AuthenticateUser(t *testing.T) {
 			req: AuthRequest{
 				UIN:      12345,
 				Password: password,
-				Version:  wire.ICQLegacyVersionV5,
+				Version:  ICQLegacyVersionV5,
 			},
 			mockParams: mockParams{
 				userManagerParams: userManagerParams{
@@ -55,7 +55,7 @@ func TestICQLegacyService_AuthenticateUser(t *testing.T) {
 			req: AuthRequest{
 				UIN:      12345,
 				Password: "wrongpass",
-				Version:  wire.ICQLegacyVersionV5,
+				Version:  ICQLegacyVersionV5,
 			},
 			mockParams: mockParams{
 				userManagerParams: userManagerParams{
@@ -80,7 +80,7 @@ func TestICQLegacyService_AuthenticateUser(t *testing.T) {
 			req: AuthRequest{
 				UIN:      99999,
 				Password: password,
-				Version:  wire.ICQLegacyVersionV5,
+				Version:  ICQLegacyVersionV5,
 			},
 			mockParams: mockParams{
 				userManagerParams: userManagerParams{
@@ -114,7 +114,7 @@ func TestICQLegacyService_AuthenticateUser(t *testing.T) {
 			req: AuthRequest{
 				UIN:      12345,
 				Password: password,
-				Version:  wire.ICQLegacyVersionV5,
+				Version:  ICQLegacyVersionV5,
 			},
 			mockParams: mockParams{
 				userManagerParams: userManagerParams{
@@ -190,7 +190,7 @@ func TestICQLegacyService_ProcessMessage(t *testing.T) {
 			req: MessageRequest{
 				FromUIN: 11111,
 				ToUIN:   22222,
-				MsgType: wire.ICQLegacyMsgText,
+				MsgType: ICQLegacyMsgText,
 				Message: "hello",
 			},
 			setupLegacyMgr: func(t *testing.T, svc *ICQLegacyService) {
@@ -205,7 +205,7 @@ func TestICQLegacyService_ProcessMessage(t *testing.T) {
 				Delivered:     true,
 				StoredOffline: false,
 				TargetOnline:  true,
-				TargetVersion: wire.ICQLegacyVersionV5,
+				TargetVersion: ICQLegacyVersionV5,
 			},
 		},
 		{
@@ -213,7 +213,7 @@ func TestICQLegacyService_ProcessMessage(t *testing.T) {
 			req: MessageRequest{
 				FromUIN: 11111,
 				ToUIN:   22222,
-				MsgType: wire.ICQLegacyMsgText,
+				MsgType: ICQLegacyMsgText,
 				Message: "hello from legacy",
 			},
 			mockParams: mockParams{
@@ -246,7 +246,7 @@ func TestICQLegacyService_ProcessMessage(t *testing.T) {
 			req: MessageRequest{
 				FromUIN: 11111,
 				ToUIN:   22222,
-				MsgType: wire.ICQLegacyMsgText,
+				MsgType: ICQLegacyMsgText,
 				Message: "offline msg",
 			},
 			mockParams: mockParams{
@@ -278,7 +278,7 @@ func TestICQLegacyService_ProcessMessage(t *testing.T) {
 			req: MessageRequest{
 				FromUIN: 0,
 				ToUIN:   22222,
-				MsgType: wire.ICQLegacyMsgText,
+				MsgType: ICQLegacyMsgText,
 				Message: "hello",
 			},
 			wantResult: &MessageResult{
@@ -292,7 +292,7 @@ func TestICQLegacyService_ProcessMessage(t *testing.T) {
 			req: MessageRequest{
 				FromUIN: 11111,
 				ToUIN:   0,
-				MsgType: wire.ICQLegacyMsgText,
+				MsgType: ICQLegacyMsgText,
 				Message: "hello",
 			},
 			wantResult: &MessageResult{
@@ -396,7 +396,7 @@ func TestICQLegacyService_ProcessContactList(t *testing.T) {
 			wantResult: &ContactListResult{
 				OnlineContacts: []ContactStatus{
 					{UIN: 22222, Online: false, Status: 0},
-					{UIN: 33333, Online: true, Status: wire.ICQLegacyStatusOnline},
+					{UIN: 33333, Online: true, Status: ICQLegacyStatusOnline},
 				},
 			},
 		},
@@ -466,8 +466,8 @@ func TestICQLegacyService_ProcessStatusChange(t *testing.T) {
 			name: "status change with notification targets",
 			req: StatusChangeRequest{
 				UIN:       11111,
-				OldStatus: wire.ICQLegacyStatusOnline,
-				NewStatus: wire.ICQLegacyStatusAway,
+				OldStatus: ICQLegacyStatusOnline,
+				NewStatus: ICQLegacyStatusAway,
 			},
 			mockParams: mockParams{
 				buddyBroadcasterParams: buddyBroadcasterParams{
@@ -496,8 +496,8 @@ func TestICQLegacyService_ProcessStatusChange(t *testing.T) {
 			name: "no targets - session not found",
 			req: StatusChangeRequest{
 				UIN:       99999,
-				OldStatus: wire.ICQLegacyStatusOnline,
-				NewStatus: wire.ICQLegacyStatusAway,
+				OldStatus: ICQLegacyStatusOnline,
+				NewStatus: ICQLegacyStatusAway,
 			},
 			mockParams: mockParams{
 				buddyBroadcasterParams: buddyBroadcasterParams{

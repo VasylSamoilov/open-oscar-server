@@ -3,8 +3,6 @@ package icq_legacy
 import (
 	"encoding/binary"
 	"net"
-
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V2PacketBuilder constructs V2 protocol packets.
@@ -78,58 +76,58 @@ func (b *V2PacketBuilderImpl) BuildLoginReply(session *LegacySession, clientConn
 	}
 
 	serverSeq := session.NextServerSeqNum()
-	pkt := wire.BuildV2LoginReply(serverSeq, clientConnectionID, session.UIN, clientIP)
+	pkt := BuildV2LoginReply(serverSeq, clientConnectionID, session.UIN, clientIP)
 	pkt.Version = session.Version
 
-	return wire.MarshalV2ServerPacket(pkt)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildBadPassword constructs a bad password/authentication failure response.
 func (b *V2PacketBuilderImpl) BuildBadPassword(seqNum uint16, version uint16) []byte {
-	pkt := wire.BuildV2BadPassword(seqNum)
+	pkt := BuildV2BadPassword(seqNum)
 	pkt.Version = version
-	return wire.MarshalV2ServerPacket(pkt)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildAck constructs an acknowledgment packet.
 func (b *V2PacketBuilderImpl) BuildAck(seqNum uint16, version uint16) []byte {
-	pkt := wire.BuildV2Ack(seqNum)
+	pkt := BuildV2Ack(seqNum)
 	pkt.Version = version
-	return wire.MarshalV2ServerPacket(pkt)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildUserOnline constructs a user online notification packet.
 // V2 USER_ONLINE format (from protocol spec):
 // REMOTE_UIN(4) + REMOTE_IP(4) + REMOTE_PORT(4) + REMOTE_REAL_IP(4) + X1(1) + STATUS(4) + X2(4) = 25 bytes
 func (b *V2PacketBuilderImpl) BuildUserOnline(seqNum uint16, uin uint32, status uint32, ip net.IP, port uint16) []byte {
-	pkt := wire.BuildV2UserOnline(seqNum, uin, status, ip, port)
-	return wire.MarshalV2ServerPacket(pkt)
+	pkt := BuildV2UserOnline(seqNum, uin, status, ip, port)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildUserOffline constructs a user offline notification packet.
 func (b *V2PacketBuilderImpl) BuildUserOffline(seqNum uint16, uin uint32) []byte {
-	pkt := wire.BuildV2UserOffline(seqNum, uin)
-	return wire.MarshalV2ServerPacket(pkt)
+	pkt := BuildV2UserOffline(seqNum, uin)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildContactListDone constructs a contact list processing complete response.
 func (b *V2PacketBuilderImpl) BuildContactListDone(seqNum uint16) []byte {
-	pkt := wire.BuildV2ContactListDone(seqNum)
-	return wire.MarshalV2ServerPacket(pkt)
+	pkt := BuildV2ContactListDone(seqNum)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildMessage constructs a message delivery packet.
 // Format: FROM_UIN(4) + MSG_TYPE(2) + MSG_LEN(2) + MESSAGE
 func (b *V2PacketBuilderImpl) BuildMessage(seqNum uint16, fromUIN uint32, msgType uint16, message string) []byte {
-	pkt := wire.BuildV2Message(seqNum, fromUIN, msgType, message)
-	return wire.MarshalV2ServerPacket(pkt)
+	pkt := BuildV2Message(seqNum, fromUIN, msgType, message)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildSearchResult constructs a user search result packet.
 // Format: SEQ(2) + UIN(4) + NICK_LEN(2) + NICK + FNAME_LEN(2) + FNAME + LNAME_LEN(2) + LNAME + EMAIL_LEN(2) + EMAIL + AUTH(1)
 func (b *V2PacketBuilderImpl) BuildSearchResult(seqNum uint16, info *UserInfoResult, isLast bool) []byte {
-	// Convert UserInfoResult to wire.LegacyUserInfo
-	wireInfo := &wire.LegacyUserInfo{
+	// Convert UserInfoResult to LegacyUserInfo
+	wireInfo := &LegacyUserInfo{
 		UIN:       info.UIN,
 		Nickname:  info.Nickname,
 		FirstName: info.FirstName,
@@ -138,25 +136,25 @@ func (b *V2PacketBuilderImpl) BuildSearchResult(seqNum uint16, info *UserInfoRes
 		Auth:      info.AuthRequired,
 	}
 
-	pkt := wire.BuildV2SearchResult(seqNum, wireInfo, isLast)
-	return wire.MarshalV2ServerPacket(pkt)
+	pkt := BuildV2SearchResult(seqNum, wireInfo, isLast)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildStatusUpdate constructs a status change notification packet.
 // Format: UIN(4) + STATUS(4)
 func (b *V2PacketBuilderImpl) BuildStatusUpdate(seqNum uint16, uin uint32, status uint32) []byte {
-	pkt := wire.BuildV2StatusUpdate(seqNum, uin, status)
-	return wire.MarshalV2ServerPacket(pkt)
+	pkt := BuildV2StatusUpdate(seqNum, uin, status)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildOfflineMsgDone constructs an end-of-offline-messages packet.
 func (b *V2PacketBuilderImpl) BuildOfflineMsgDone(seqNum uint16) []byte {
-	pkt := &wire.V2ServerPacket{
-		Version: wire.ICQLegacyVersionV2,
-		Command: wire.ICQLegacySrvSysMsgDone,
+	pkt := &V2ServerPacket{
+		Version: ICQLegacyVersionV2,
+		Command: ICQLegacySrvSysMsgDone,
 		SeqNum:  seqNum,
 	}
-	return wire.MarshalV2ServerPacket(pkt)
+	return MarshalV2ServerPacket(pkt)
 }
 
 // BuildDepsList constructs a pre-auth response packet (0x0032).
@@ -188,11 +186,11 @@ func (b *V2PacketBuilderImpl) BuildDepsList(seqNum uint16, uin uint32) []byte {
 	binary.LittleEndian.PutUint16(data[offset:], 0x002A)
 	offset += 2
 
-	pkt := &wire.V2ServerPacket{
-		Version: wire.ICQLegacyVersionV2,
-		Command: wire.ICQLegacySrvUserDepsList,
+	pkt := &V2ServerPacket{
+		Version: ICQLegacyVersionV2,
+		Command: ICQLegacySrvUserDepsList,
 		SeqNum:  seqNum,
 		Data:    data[:offset],
 	}
-	return wire.MarshalV2ServerPacket(pkt)
+	return MarshalV2ServerPacket(pkt)
 }

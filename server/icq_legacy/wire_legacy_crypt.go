@@ -1,4 +1,4 @@
-package wire
+package icq_legacy
 
 import (
 	"encoding/binary"

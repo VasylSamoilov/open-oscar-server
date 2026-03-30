@@ -656,7 +656,7 @@ func ICQLegacy(deps Container) *icq_legacy.LegacyServer {
 	v2PacketBuilder := icq_legacy.NewV2PacketBuilder()
 	v3PacketBuilder := icq_legacy.NewV3PacketBuilder()
 	v4PacketBuilder := icq_legacy.NewV4PacketBuilder()
-	v5PacketBuilder := icq_legacy.NewV5PacketBuilder(sessionManager)
+	v5PacketBuilder := icq_legacy.NewV5PacketBuilder(sessionManager, deps.cfg.ICQLegacy.DirectConnectionEnabled)
 	v1Handler := icq_legacy.NewV1Handler(sessionManager, icqLegacyService, nil, logger)
 	v2Handler := icq_legacy.NewV2Handler(sessionManager, icqLegacyService, nil, v2PacketBuilder, logger)
 	v3Handler := icq_legacy.NewV3Handler(sessionManager, icqLegacyService, nil, v3PacketBuilder, logger)

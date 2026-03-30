@@ -11,7 +11,6 @@ import (
 
 	"github.com/mk6i/open-oscar-server/config"
 	"github.com/mk6i/open-oscar-server/state"
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // LegacySessionManager manages sessions for legacy ICQ clients
@@ -72,7 +71,7 @@ func (m *LegacySessionManager) CreateSession(uin uint32, addr *net.UDPAddr, vers
 	}
 
 	// Generate session ID for V5
-	sessionID := wire.GenerateSessionID()
+	sessionID := GenerateSessionID()
 
 	// Mark the unified session instance as signon-complete so that
 	// RetrieveSession() considers this session "live". Without this, the
@@ -88,7 +87,7 @@ func (m *LegacySessionManager) CreateSession(uin uint32, addr *net.UDPAddr, vers
 		Version:      version,
 		SessionID:    sessionID,
 		SeqNumServer: 1, // Start at 1 to avoid seq collision with pre-auth depslist (which uses seq=0 in V3 format)
-		Status:       wire.ICQLegacyStatusOnline,
+		Status:       ICQLegacyStatusOnline,
 		LastActivity: time.Now(),
 		Instance:     instance,
 	}
@@ -239,7 +238,7 @@ func (m *LegacySessionManager) isVisibleTo(session *LegacySession, viewerUIN uin
 	status := session.GetStatus()
 
 	// If invisible, only visible to those on visible list
-	if status&wire.ICQLegacyStatusInvisible != 0 {
+	if status&ICQLegacyStatusInvisible != 0 {
 		return session.IsOnVisibleList(viewerUIN)
 	}
 

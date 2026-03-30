@@ -76,8 +76,8 @@ type LegacySession struct {
 	// InternalIP is the client's internal/LAN IP address for direct connections.
 	InternalIP uint32
 
-	// TCPVersion is the client's TCP protocol version for direct connections.
-	TCPVersion uint16
+	// DCVersion is the client's direct connection protocol version.
+	DCVersion uint16
 
 	// DCType is the direct connection type (normal, SOCKS, etc.).
 	DCType uint8
@@ -228,20 +228,20 @@ func (s *LegacySession) GetInternalIP() uint32 {
 	return s.InternalIP
 }
 
-// GetTCPVersion returns the TCP protocol version
-func (s *LegacySession) GetTCPVersion() uint16 {
+// GetDCVersion returns the direct connection protocol version
+func (s *LegacySession) GetDCVersion() uint16 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.TCPVersion
+	return s.DCVersion
 }
 
 // SetDirectConnectionInfo sets the direct connection parameters
-func (s *LegacySession) SetDirectConnectionInfo(tcpPort, internalIP uint32, tcpVersion uint16, dcType uint8) {
+func (s *LegacySession) SetDirectConnectionInfo(tcpPort, internalIP uint32, dcVersion uint16, dcType uint8) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.TCPPort = tcpPort
 	s.InternalIP = internalIP
-	s.TCPVersion = tcpVersion
+	s.DCVersion = dcVersion
 	s.DCType = dcType
 }
 

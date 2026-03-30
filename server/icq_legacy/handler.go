@@ -8,7 +8,6 @@ import (
 
 	"github.com/mk6i/open-oscar-server/config"
 	"github.com/mk6i/open-oscar-server/state"
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // ProtocolDispatcher routes packets to the appropriate version handler
@@ -45,7 +44,7 @@ func NewProtocolDispatcher(
 
 // Dispatch routes a packet to the appropriate handler based on protocol version
 func (d *ProtocolDispatcher) Dispatch(session *LegacySession, addr *net.UDPAddr, packet []byte) error {
-	version, err := wire.DetectProtocolVersion(packet)
+	version, err := DetectProtocolVersion(packet)
 	if err != nil {
 		return fmt.Errorf("detecting protocol version: %w", err)
 	}
@@ -62,15 +61,15 @@ func (d *ProtocolDispatcher) Dispatch(session *LegacySession, addr *net.UDPAddr,
 	)
 
 	switch version {
-	case wire.ICQLegacyVersionV1:
+	case ICQLegacyVersionV1:
 		return d.v1Handler.Handle(session, addr, packet)
-	case wire.ICQLegacyVersionV2:
+	case ICQLegacyVersionV2:
 		return d.v2Handler.Handle(session, addr, packet)
-	case wire.ICQLegacyVersionV3:
+	case ICQLegacyVersionV3:
 		return d.v3Handler.Handle(session, addr, packet)
-	case wire.ICQLegacyVersionV4:
+	case ICQLegacyVersionV4:
 		return d.v4Handler.Handle(session, addr, packet)
-	case wire.ICQLegacyVersionV5:
+	case ICQLegacyVersionV5:
 		return d.v5Handler.Handle(session, addr, packet)
 	default:
 		return fmt.Errorf("unknown protocol version: %d", version)
@@ -93,15 +92,15 @@ func (d *ProtocolDispatcher) SendUserOnline(toSession *LegacySession, onlineUIN 
 	)
 
 	switch toSession.Version {
-	case wire.ICQLegacyVersionV1:
+	case ICQLegacyVersionV1:
 		return d.v1Handler.sendUserOnline(toSession, onlineUIN, status, nil, 0)
-	case wire.ICQLegacyVersionV2:
+	case ICQLegacyVersionV2:
 		return d.v2Handler.sendUserOnline(toSession, onlineUIN, status, nil, 0)
-	case wire.ICQLegacyVersionV3:
+	case ICQLegacyVersionV3:
 		return d.v3Handler.sendUserOnline(toSession, onlineUIN, status)
-	case wire.ICQLegacyVersionV4:
+	case ICQLegacyVersionV4:
 		return d.v4Handler.sendUserOnline(toSession, onlineUIN, status)
-	case wire.ICQLegacyVersionV5:
+	case ICQLegacyVersionV5:
 		return d.v5Handler.sendV5UserOnline(toSession, onlineUIN, status)
 	default:
 		return nil
@@ -124,15 +123,15 @@ func (d *ProtocolDispatcher) SendOnlineMessage(toSession *LegacySession, fromUIN
 	)
 
 	switch toSession.Version {
-	case wire.ICQLegacyVersionV1:
+	case ICQLegacyVersionV1:
 		return d.v1Handler.sendMessage(toSession, fromUIN, msgType, message)
-	case wire.ICQLegacyVersionV2:
+	case ICQLegacyVersionV2:
 		return d.v2Handler.sendMessage(toSession, fromUIN, msgType, message)
-	case wire.ICQLegacyVersionV3:
+	case ICQLegacyVersionV3:
 		return d.v3Handler.sendOnlineMessage(toSession, fromUIN, msgType, message, 0)
-	case wire.ICQLegacyVersionV4:
+	case ICQLegacyVersionV4:
 		return d.v4Handler.sendOnlineMessage(toSession, fromUIN, msgType, message, 0)
-	case wire.ICQLegacyVersionV5:
+	case ICQLegacyVersionV5:
 		return d.v5Handler.sendOnlineMessage(toSession, fromUIN, msgType, message)
 	default:
 		return nil
@@ -154,15 +153,15 @@ func (d *ProtocolDispatcher) SendUserOffline(toSession *LegacySession, offlineUI
 	)
 
 	switch toSession.Version {
-	case wire.ICQLegacyVersionV1:
+	case ICQLegacyVersionV1:
 		return d.v1Handler.sendUserOffline(toSession, offlineUIN)
-	case wire.ICQLegacyVersionV2:
+	case ICQLegacyVersionV2:
 		return d.v2Handler.sendUserOffline(toSession, offlineUIN)
-	case wire.ICQLegacyVersionV3:
+	case ICQLegacyVersionV3:
 		return d.v3Handler.sendUserOffline(toSession, offlineUIN)
-	case wire.ICQLegacyVersionV4:
+	case ICQLegacyVersionV4:
 		return d.v4Handler.sendUserOffline(toSession, offlineUIN)
-	case wire.ICQLegacyVersionV5:
+	case ICQLegacyVersionV5:
 		return d.v5Handler.sendV5UserOffline(toSession, offlineUIN)
 	default:
 		return nil
@@ -187,15 +186,15 @@ func (d *ProtocolDispatcher) SendStatusChange(toSession *LegacySession, changedU
 	)
 
 	switch toSession.Version {
-	case wire.ICQLegacyVersionV1:
+	case ICQLegacyVersionV1:
 		return d.v1Handler.sendStatusUpdate(toSession, changedUIN, newStatus)
-	case wire.ICQLegacyVersionV2:
+	case ICQLegacyVersionV2:
 		return d.v2Handler.sendStatusUpdate(toSession, changedUIN, newStatus)
-	case wire.ICQLegacyVersionV3:
+	case ICQLegacyVersionV3:
 		return d.v3Handler.sendUserStatus(toSession, changedUIN, newStatus)
-	case wire.ICQLegacyVersionV4:
+	case ICQLegacyVersionV4:
 		return d.v4Handler.sendUserStatus(toSession, changedUIN, newStatus)
-	case wire.ICQLegacyVersionV5:
+	case ICQLegacyVersionV5:
 		return d.v5Handler.sendV5UserStatus(toSession, changedUIN, newStatus)
 	default:
 		return nil
@@ -422,9 +421,9 @@ type LegacyService interface {
 
 // sendAck sends an acknowledgment packet to the session using V2 packet format.
 func (h *BaseHandler) sendAck(session *LegacySession, seqNum uint16) error {
-	pkt := wire.BuildV2Ack(seqNum)
+	pkt := BuildV2Ack(seqNum)
 	pkt.Version = session.Version
-	return h.sender.SendToSession(session, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV2ServerPacket(pkt))
 }
 
 // sendLoginReply sends a login success response
@@ -436,10 +435,10 @@ func (h *BaseHandler) sendLoginReply(session *LegacySession, clientSeqNum uint16
 	// Use server's own sequence number for packet header
 	// Echo client's login sequence in the data payload
 	serverSeq := session.NextServerSeqNum()
-	pkt := wire.BuildV2LoginReply(serverSeq, clientSeqNum, session.UIN, clientIP)
+	pkt := BuildV2LoginReply(serverSeq, clientSeqNum, session.UIN, clientIP)
 	pkt.Version = session.Version
 
-	rawPkt := wire.MarshalV2ServerPacket(pkt)
+	rawPkt := MarshalV2ServerPacket(pkt)
 	h.logger.Debug("sending V2 login reply",
 		"uin", session.UIN,
 		"server_seq", serverSeq,
@@ -454,49 +453,49 @@ func (h *BaseHandler) sendLoginReply(session *LegacySession, clientSeqNum uint16
 
 // sendBadPassword sends a bad password response
 func (h *BaseHandler) sendBadPassword(addr *net.UDPAddr, seqNum uint16, version uint16) error {
-	pkt := wire.BuildV2BadPassword(seqNum)
+	pkt := BuildV2BadPassword(seqNum)
 	pkt.Version = version
-	return h.sender.SendPacket(addr, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendPacket(addr, MarshalV2ServerPacket(pkt))
 }
 
 // sendUserOnline sends a user online notification
 func (h *BaseHandler) sendUserOnline(session *LegacySession, uin uint32, status uint32, ip net.IP, port uint16) error {
-	pkt := wire.BuildV2UserOnline(session.NextServerSeqNum(), uin, status, ip, port)
+	pkt := BuildV2UserOnline(session.NextServerSeqNum(), uin, status, ip, port)
 	pkt.Version = session.Version
-	return h.sender.SendToSession(session, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV2ServerPacket(pkt))
 }
 
 // sendUserOffline sends a user offline notification
 func (h *BaseHandler) sendUserOffline(session *LegacySession, uin uint32) error {
-	pkt := wire.BuildV2UserOffline(session.NextServerSeqNum(), uin)
+	pkt := BuildV2UserOffline(session.NextServerSeqNum(), uin)
 	pkt.Version = session.Version
-	return h.sender.SendToSession(session, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV2ServerPacket(pkt))
 }
 
 // sendStatusUpdate sends a status update notification
 func (h *BaseHandler) sendStatusUpdate(session *LegacySession, uin uint32, status uint32) error {
-	pkt := wire.BuildV2StatusUpdate(session.NextServerSeqNum(), uin, status)
+	pkt := BuildV2StatusUpdate(session.NextServerSeqNum(), uin, status)
 	pkt.Version = session.Version
-	return h.sender.SendToSession(session, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV2ServerPacket(pkt))
 }
 
 // sendContactListDone sends a contact list processed response
 func (h *BaseHandler) sendContactListDone(session *LegacySession, seqNum uint16) error {
-	pkt := wire.BuildV2ContactListDone(seqNum)
+	pkt := BuildV2ContactListDone(seqNum)
 	pkt.Version = session.Version
-	return h.sender.SendToSession(session, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV2ServerPacket(pkt))
 }
 
 // sendMessage sends a message to a session
 func (h *BaseHandler) sendMessage(session *LegacySession, fromUIN uint32, msgType uint16, message string) error {
-	pkt := wire.BuildV2Message(session.NextServerSeqNum(), fromUIN, msgType, message)
+	pkt := BuildV2Message(session.NextServerSeqNum(), fromUIN, msgType, message)
 	pkt.Version = session.Version
-	return h.sender.SendToSession(session, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV2ServerPacket(pkt))
 }
 
 // sendSearchResult sends a search result
 func (h *BaseHandler) sendSearchResult(session *LegacySession, user *LegacyUserSearchResult, isLast bool) error {
-	info := &wire.LegacyUserInfo{
+	info := &LegacyUserInfo{
 		UIN:       user.UIN,
 		Nickname:  truncateField(user.Nickname, 20, h.logger, "nickname", user.UIN),
 		FirstName: truncateField(user.FirstName, 64, h.logger, "first_name", user.UIN),
@@ -504,7 +503,7 @@ func (h *BaseHandler) sendSearchResult(session *LegacySession, user *LegacyUserS
 		Email:     truncateField(user.Email, 64, h.logger, "email", user.UIN),
 		Auth:      user.AuthRequired,
 	}
-	pkt := wire.BuildV2SearchResult(session.NextServerSeqNum(), info, isLast)
+	pkt := BuildV2SearchResult(session.NextServerSeqNum(), info, isLast)
 	pkt.Version = session.Version
-	return h.sender.SendToSession(session, wire.MarshalV2ServerPacket(pkt))
+	return h.sender.SendToSession(session, MarshalV2ServerPacket(pkt))
 }

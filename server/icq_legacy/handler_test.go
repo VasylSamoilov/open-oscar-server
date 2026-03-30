@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/mk6i/open-oscar-server/config"
-	"github.com/mk6i/open-oscar-server/wire"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -32,10 +31,10 @@ func newTestDispatcher(t *testing.T, sender PacketSender) *ProtocolDispatcher {
 	v2 := NewV2Handler(sessions, svc, sender, NewV2PacketBuilder(), logger)
 	v3 := NewV3Handler(sessions, svc, sender, NewV3PacketBuilder(), logger)
 	v4 := NewV4Handler(sessions, svc, sender, NewV4PacketBuilder(), logger)
-	v5 := NewV5Handler(sessions, svc, sender, NewV5PacketBuilder(sessions), logger)
+	v5 := NewV5Handler(sessions, svc, sender, NewV5PacketBuilder(sessions, nil), logger)
 
 	cfg := config.ICQLegacyConfig{
-		SupportedVersions: []int{2, 3, 4, 5},
+		SupportedVersions: []int{3, 4, 5},
 	}
 
 	return NewProtocolDispatcher(v1, v2, v3, v4, v5, cfg, logger)
@@ -50,10 +49,9 @@ func TestProtocolDispatcher_SendUserOnline(t *testing.T) {
 		name    string
 		version uint16
 	}{
-		{"V2", wire.ICQLegacyVersionV2},
-		{"V3", wire.ICQLegacyVersionV3},
-		{"V4", wire.ICQLegacyVersionV4},
-		{"V5", wire.ICQLegacyVersionV5},
+		{"V3", ICQLegacyVersionV3},
+		{"V4", ICQLegacyVersionV4},
+		{"V5", ICQLegacyVersionV5},
 	}
 
 	for _, tt := range tests {
@@ -88,10 +86,9 @@ func TestProtocolDispatcher_SendUserOffline(t *testing.T) {
 		name    string
 		version uint16
 	}{
-		{"V2", wire.ICQLegacyVersionV2},
-		{"V3", wire.ICQLegacyVersionV3},
-		{"V4", wire.ICQLegacyVersionV4},
-		{"V5", wire.ICQLegacyVersionV5},
+		{"V3", ICQLegacyVersionV3},
+		{"V4", ICQLegacyVersionV4},
+		{"V5", ICQLegacyVersionV5},
 	}
 
 	for _, tt := range tests {
@@ -116,10 +113,9 @@ func TestProtocolDispatcher_SendStatusChange(t *testing.T) {
 		name    string
 		version uint16
 	}{
-		{"V2", wire.ICQLegacyVersionV2},
-		{"V3", wire.ICQLegacyVersionV3},
-		{"V4", wire.ICQLegacyVersionV4},
-		{"V5", wire.ICQLegacyVersionV5},
+		{"V3", ICQLegacyVersionV3},
+		{"V4", ICQLegacyVersionV4},
+		{"V5", ICQLegacyVersionV5},
 	}
 
 	for _, tt := range tests {
@@ -144,10 +140,9 @@ func TestProtocolDispatcher_SendOnlineMessage(t *testing.T) {
 		name    string
 		version uint16
 	}{
-		{"V2", wire.ICQLegacyVersionV2},
-		{"V3", wire.ICQLegacyVersionV3},
-		{"V4", wire.ICQLegacyVersionV4},
-		{"V5", wire.ICQLegacyVersionV5},
+		{"V3", ICQLegacyVersionV3},
+		{"V4", ICQLegacyVersionV4},
+		{"V5", ICQLegacyVersionV5},
 	}
 
 	for _, tt := range tests {
@@ -177,10 +172,9 @@ func TestProtocolDispatcher_SendOnlineMessage(t *testing.T) {
 
 func TestProperty_DispatcherRoutesToVersionHandler(t *testing.T) {
 	versions := []uint16{
-		wire.ICQLegacyVersionV2,
-		wire.ICQLegacyVersionV3,
-		wire.ICQLegacyVersionV4,
-		wire.ICQLegacyVersionV5,
+		ICQLegacyVersionV3,
+		ICQLegacyVersionV4,
+		ICQLegacyVersionV5,
 	}
 
 	type dispatchOp struct {
@@ -247,10 +241,9 @@ func TestProperty_DispatcherRoutesToVersionHandler(t *testing.T) {
 
 func TestProperty_CrossVersionMessageContentPreservation(t *testing.T) {
 	versions := []uint16{
-		wire.ICQLegacyVersionV2,
-		wire.ICQLegacyVersionV3,
-		wire.ICQLegacyVersionV4,
-		wire.ICQLegacyVersionV5,
+		ICQLegacyVersionV3,
+		ICQLegacyVersionV4,
+		ICQLegacyVersionV5,
 	}
 
 	messages := []struct {
@@ -295,15 +288,15 @@ func TestProperty_CrossVersionMessageContentPreservation(t *testing.T) {
 // versionName returns a human-readable name for a protocol version constant.
 func versionName(v uint16) string {
 	switch v {
-	case wire.ICQLegacyVersionV1:
+	case ICQLegacyVersionV1:
 		return "V1"
-	case wire.ICQLegacyVersionV2:
+	case ICQLegacyVersionV2:
 		return "V2"
-	case wire.ICQLegacyVersionV3:
+	case ICQLegacyVersionV3:
 		return "V3"
-	case wire.ICQLegacyVersionV4:
+	case ICQLegacyVersionV4:
 		return "V4"
-	case wire.ICQLegacyVersionV5:
+	case ICQLegacyVersionV5:
 		return "V5"
 	default:
 		return "Unknown"

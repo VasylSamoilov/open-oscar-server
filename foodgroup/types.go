@@ -282,11 +282,6 @@ type ICQUserUpdater interface {
 
 	// SetPermissions updates the user's privacy and permission settings.
 	SetPermissions(ctx context.Context, name state.IdentScreenName, data state.ICQPermissions) error
-
-	// SetHomepageCategory updates the user's homepage category information.
-	// This is used by the V5 META_SET_HPCAT (0x0442) command.
-	// From iserverd v5_set_hpcat_info() - updates user's homepage category.
-	SetHomepageCategory(ctx context.Context, name state.IdentScreenName, data state.ICQHomepageCategory) error
 }
 
 // MessageRelayer defines methods for delivering SNAC messages to one or more

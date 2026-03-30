@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-
-	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V1Handler handles ICQ V1 protocol packets.
@@ -48,7 +46,7 @@ func (h *V1Handler) Handle(session *LegacySession, addr *net.UDPAddr, packet []b
 	// Peek at the command field (bytes 2-4) to check for 0x03F2
 	if len(packet) >= 4 {
 		cmd := binary.LittleEndian.Uint16(packet[2:4])
-		if cmd == wire.ICQLegacyCmdGetDeps {
+		if cmd == ICQLegacyCmdGetDeps {
 			return h.handleV1Login(session, addr, packet)
 		}
 	}
@@ -95,7 +93,7 @@ func (h *V1Handler) handleV1Login(session *LegacySession, addr *net.UDPAddr, pac
 
 	if pwdLen == 0 || pwdLen > 20 || offset+int(pwdLen) > len(data) {
 		h.logger.Debug("invalid password in V1 login", "pwd_len", pwdLen)
-		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(seqNum, wire.ICQLegacyVersionV1))
+		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(seqNum, ICQLegacyVersionV1))
 	}
 
 	password := string(data[offset : offset+int(pwdLen)])
@@ -121,27 +119,27 @@ func (h *V1Handler) handleV1Login(session *LegacySession, addr *net.UDPAddr, pac
 		UIN:      uin,
 		Password: password,
 		Status:   status,
-		Version:  wire.ICQLegacyVersionV1,
+		Version:  ICQLegacyVersionV1,
 	}
 
 	authResult, err := h.service.AuthenticateUser(ctx, authReq)
 	if err != nil || !authResult.Success {
 		h.logger.Info("V1 login failed - invalid credentials", "uin", uin)
-		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(seqNum, wire.ICQLegacyVersionV1))
+		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(seqNum, ICQLegacyVersionV1))
 	}
 
 	// Create session
-	newSession, err := h.sessions.CreateSession(uin, addr, wire.ICQLegacyVersionV1)
+	newSession, err := h.sessions.CreateSession(uin, addr, ICQLegacyVersionV1)
 	if err != nil {
 		h.logger.Error("failed to create V1 session", "err", err, "uin", uin)
-		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(seqNum, wire.ICQLegacyVersionV1))
+		return h.sender.SendPacket(addr, h.packetBuilder.BuildBadPassword(seqNum, ICQLegacyVersionV1))
 	}
 
 	newSession.SetStatus(status)
 	newSession.Password = password
 
 	// Send ACK
-	ackPkt := h.packetBuilder.BuildAck(seqNum, wire.ICQLegacyVersionV1)
+	ackPkt := h.packetBuilder.BuildAck(seqNum, ICQLegacyVersionV1)
 	if err := h.sender.SendToSession(newSession, ackPkt); err != nil {
 		return err
 	}
