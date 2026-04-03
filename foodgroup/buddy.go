@@ -142,20 +142,13 @@ func newBuddyNotifier(
 	relationshipFetcher RelationshipFetcher,
 	messageRelayer MessageRelayer,
 	sessionRetriever SessionRetriever,
-	loggers ...*slog.Logger,
 ) buddyNotifier {
-	var logger *slog.Logger
-	if len(loggers) > 0 && loggers[0] != nil {
-		logger = loggers[0]
-	} else {
-		logger = slog.Default()
-	}
 	return buddyNotifier{
 		bartItemManager:     bartItemManager,
 		relationshipFetcher: relationshipFetcher,
 		messageRelayer:      messageRelayer,
 		sessionRetriever:    sessionRetriever,
-		logger:              logger,
+		logger:              slog.Default(),
 	}
 }
 
