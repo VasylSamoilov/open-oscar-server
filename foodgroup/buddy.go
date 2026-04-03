@@ -3,6 +3,7 @@ package foodgroup
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/mk6i/open-oscar-server/state"
 	"github.com/mk6i/open-oscar-server/wire"
@@ -141,12 +142,20 @@ func newBuddyNotifier(
 	relationshipFetcher RelationshipFetcher,
 	messageRelayer MessageRelayer,
 	sessionRetriever SessionRetriever,
+	loggers ...*slog.Logger,
 ) buddyNotifier {
+	var logger *slog.Logger
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	} else {
+		logger = slog.Default()
+	}
 	return buddyNotifier{
 		bartItemManager:     bartItemManager,
 		relationshipFetcher: relationshipFetcher,
 		messageRelayer:      messageRelayer,
 		sessionRetriever:    sessionRetriever,
+		logger:              logger,
 	}
 }
 
@@ -157,6 +166,7 @@ type buddyNotifier struct {
 	relationshipFetcher RelationshipFetcher
 	messageRelayer      MessageRelayer
 	sessionRetriever    SessionRetriever
+	logger              *slog.Logger
 }
 
 // BroadcastBuddyArrived sends the latest user info to the user's adjacent users.
@@ -263,25 +273,50 @@ func (s buddyNotifier) BroadcastVisibility(
 		return fmt.Errorf("retrieving relationships: %w", err)
 	}
 
+	s.logger.InfoContext(ctx, "BroadcastVisibility",
+		"you", you.IdentScreenName(),
+		"relationship_count", len(relationships),
+	)
+
 	yourTLVInfo := you.Session().TLVUserInfo()
 
 	for _, relationship := range relationships {
+		s.logger.InfoContext(ctx, "BroadcastVisibility: relationship",
+			"you", you.IdentScreenName(),
+			"them", relationship.User,
+			"on_your_list", relationship.IsOnYourList,
+			"on_their_list", relationship.IsOnTheirList,
+			"blocks_you", relationship.BlocksYou,
+			"you_block", relationship.YouBlock,
+		)
+
 		if relationship.BlocksYou {
 			continue // they block you, don't send them notifications
 		}
 
 		theirSess := s.sessionRetriever.RetrieveSession(relationship.User)
 		if theirSess == nil {
+			s.logger.InfoContext(ctx, "BroadcastVisibility: they are offline",
+				"them", relationship.User,
+			)
 			continue // they are offline
 		}
 
 		if !relationship.YouBlock {
 			if relationship.IsOnTheirList {
+				s.logger.InfoContext(ctx, "BroadcastVisibility: telling them you're online",
+					"you", you.IdentScreenName(),
+					"them", theirSess.IdentScreenName(),
+				)
 				// tell them you're online
 				s.unicastBuddyArrived(ctx, yourTLVInfo, theirSess.IdentScreenName())
 			}
 			if relationship.IsOnYourList {
 				theirInfo := theirSess.TLVUserInfo()
+				s.logger.InfoContext(ctx, "BroadcastVisibility: telling you they're online",
+					"you", you.IdentScreenName(),
+					"them", theirSess.IdentScreenName(),
+				)
 				// tell you they're online
 				s.unicastBuddyArrived(ctx, theirInfo, you.IdentScreenName())
 			}

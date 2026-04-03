@@ -2140,3 +2140,63 @@ func (_c *mockLegacyService_WhitePagesSearch_Call) RunAndReturn(run func(ctx con
 	_c.Call.Return(run)
 	return _c
 }
+
+// UpdateBasicInfo provides a mock function for the type mockLegacyService
+func (_mock *mockLegacyService) UpdateBasicInfo(ctx context.Context, uin uint32, info state.ICQBasicInfo) error {
+	ret := _mock.Called(ctx, uin, info)
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateBasicInfo")
+	}
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32, state.ICQBasicInfo) error); ok {
+		r0 = returnFunc(ctx, uin, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// UpdateWorkInfo provides a mock function for the type mockLegacyService
+func (_mock *mockLegacyService) UpdateWorkInfo(ctx context.Context, uin uint32, info state.ICQWorkInfo) error {
+	ret := _mock.Called(ctx, uin, info)
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateWorkInfo")
+	}
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32, state.ICQWorkInfo) error); ok {
+		r0 = returnFunc(ctx, uin, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// UpdateMoreInfo provides a mock function for the type mockLegacyService
+func (_mock *mockLegacyService) UpdateMoreInfo(ctx context.Context, uin uint32, info state.ICQMoreInfo) error {
+	ret := _mock.Called(ctx, uin, info)
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateMoreInfo")
+	}
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32, state.ICQMoreInfo) error); ok {
+		r0 = returnFunc(ctx, uin, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// UpdatePermissions provides a mock function for the type mockLegacyService
+func (_mock *mockLegacyService) UpdatePermissions(ctx context.Context, uin uint32, info state.ICQPermissions) error {
+	ret := _mock.Called(ctx, uin, info)
+	if len(ret) == 0 {
+		panic("no return value specified for UpdatePermissions")
+	}
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint32, state.ICQPermissions) error); ok {
+		r0 = returnFunc(ctx, uin, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}

@@ -253,6 +253,9 @@ packages:
       RelationshipFetcher:
         config:
           filename: "mock_relationship_fetcher_test.go"
+      BuddyListRegistry:
+        config:
+          filename: "mock_buddy_list_registry_test.go"
       PacketSender:
         config:
           filename: "mock_packet_sender_test.go"

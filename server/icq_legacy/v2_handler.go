@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net"
 	"time"
+
+	"github.com/mk6i/open-oscar-server/state"
 )
 
 // V2Handler handles ICQ V2 protocol packets
@@ -262,6 +264,12 @@ func (h *V2Handler) handleLogoff(session *LegacySession, pkt *V2ClientPacket) er
 		h.sendUserOffline(contact, session.UIN)
 	})
 
+	// Notify OSCAR clients that this user went offline
+	ctx := context.Background()
+	if err := h.service.NotifyUserOffline(ctx, session.UIN); err != nil {
+		h.logger.Debug("V2 failed to notify OSCAR clients of offline", "uin", session.UIN, "err", err)
+	}
+
 	// Remove session
 	h.sessions.RemoveSession(session.UIN)
 
@@ -350,6 +358,11 @@ func (h *V2Handler) handleContactList(session *LegacySession, pkt *V2ClientPacke
 			)
 			h.sender.SendToSession(session, onlinePkt)
 		}
+	}
+
+	// Notify OSCAR clients that this legacy user is online
+	if err := h.service.NotifyUserOnline(ctx, session.UIN, session.GetStatus()); err != nil {
+		h.logger.Debug("V2 failed to notify OSCAR clients of online", "uin", session.UIN, "err", err)
 	}
 
 	// 4. Send contact list done using packet builder
@@ -1130,8 +1143,22 @@ func (h *V2Handler) handleUpdateBasic(session *LegacySession, pkt *V2ClientPacke
 		"auth", auth,
 	)
 
-	// TODO: Persist via service layer (see docs/TODO_LEGACY_PROFILE_SET.md)
-	// For now, send success ACK so the client doesn't hang
+	// Persist basic info via service layer
+	ctx := context.Background()
+	info := state.ICQBasicInfo{
+		Nickname:     alias,
+		FirstName:    firstName,
+		LastName:     lastName,
+		EmailAddress: email,
+	}
+	if err := h.service.UpdateBasicInfo(ctx, session.UIN, info); err != nil {
+		h.logger.Error("V2 update basic info failed", "uin", session.UIN, "err", err)
+	}
+
+	// Update auth mode
+	if err := h.service.SetAuthMode(ctx, session.UIN, auth == 1); err != nil {
+		h.logger.Error("V2 set auth mode failed", "uin", session.UIN, "err", err)
+	}
 
 	// Send SRV_UPDATEDxBASIC (0x00B4) with the update sequence
 	data := make([]byte, 2)
@@ -1193,7 +1220,7 @@ func (h *V2Handler) handleUpdateDetail(session *LegacySession, pkt *V2ClientPack
 	binary.Read(r, binary.LittleEndian, &country)
 	var countryStat uint8
 	binary.Read(r, binary.LittleEndian, &countryStat)
-	state, _ := ParseLegacyString(r, true)
+	st, _ := ParseLegacyString(r, true)
 	var age uint16
 	binary.Read(r, binary.LittleEndian, &age)
 	var sex uint8
@@ -1206,7 +1233,7 @@ func (h *V2Handler) handleUpdateDetail(session *LegacySession, pkt *V2ClientPack
 		"uin", session.UIN,
 		"city", city,
 		"country", country,
-		"state", state,
+		"state", st,
 		"age", age,
 		"sex", sex,
 		"phone", phone,
@@ -1214,8 +1241,34 @@ func (h *V2Handler) handleUpdateDetail(session *LegacySession, pkt *V2ClientPack
 		"about", about,
 	)
 
-	// TODO: Persist via service layer (see docs/TODO_LEGACY_PROFILE_SET.md)
-	// For now, send success ACK so the client doesn't hang
+	// Persist detail info via service layer
+	// Read existing basic info to avoid overwriting nick/first/last/email
+	ctx := context.Background()
+	existing, err := h.service.GetFullUserInfo(ctx, session.UIN)
+	if err == nil && existing != nil {
+		existing.ICQBasicInfo.City = city
+		existing.ICQBasicInfo.CountryCode = country
+		existing.ICQBasicInfo.State = st
+		existing.ICQBasicInfo.Phone = phone
+		if err := h.service.UpdateBasicInfo(ctx, session.UIN, existing.ICQBasicInfo); err != nil {
+			h.logger.Error("V2 update detail basic failed", "uin", session.UIN, "err", err)
+		}
+	}
+
+	// Read existing more info to avoid overwriting birthday/languages
+	if existing != nil {
+		existing.ICQMoreInfo.Gender = uint16(sex)
+		existing.ICQMoreInfo.HomePageAddr = homepage
+		if err := h.service.UpdateMoreInfo(ctx, session.UIN, existing.ICQMoreInfo); err != nil {
+			h.logger.Error("V2 update detail more failed", "uin", session.UIN, "err", err)
+		}
+	}
+
+	if about != "" {
+		if err := h.service.SetNotes(ctx, session.UIN, about); err != nil {
+			h.logger.Error("V2 update detail about failed", "uin", session.UIN, "err", err)
+		}
+	}
 
 	// Send SRV_UPDATEDxDETAIL (0x00C8) with the update sequence
 	data := make([]byte, 2)

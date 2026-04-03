@@ -70,6 +70,8 @@ func TestProperty_ServiceBehavioralEquivalence(t *testing.T) {
 			newMockICQUserUpdater(t),
 			newMockFeedbagManager(t),
 			newMockRelationshipFetcher(t),
+			newMockBuddyListRegistry(t),
+			newMockClientSideBuddyListManager(t),
 			slog.Default(),
 		)
 

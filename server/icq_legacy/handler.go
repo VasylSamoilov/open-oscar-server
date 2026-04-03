@@ -343,6 +343,9 @@ type LegacyService interface {
 	// NotifyUserOffline broadcasts a user departure to OSCAR clients.
 	NotifyUserOffline(ctx context.Context, uin uint32) error
 
+	// NotifyUserOnline broadcasts a user arrival to OSCAR clients.
+	NotifyUserOnline(ctx context.Context, uin uint32, status uint32) error
+
 	// User Management
 	// DeleteUser removes a user account from the system.
 	// This is used by the V5 META_USER_UNREGISTER (0x04C4) command.
@@ -417,6 +420,16 @@ type LegacyService interface {
 	// This is used by the V5 META_SET_HPCAT (0x0442) command.
 	// From iserverd v5_set_hpcat_info() - updates user's homepage category.
 	SetHomepageCategory(ctx context.Context, uin uint32, hpcat state.ICQHomepageCategory) error
+
+	// Profile Update Operations
+	// UpdateBasicInfo updates a user's basic profile information.
+	UpdateBasicInfo(ctx context.Context, uin uint32, info state.ICQBasicInfo) error
+	// UpdateWorkInfo updates a user's work information.
+	UpdateWorkInfo(ctx context.Context, uin uint32, info state.ICQWorkInfo) error
+	// UpdateMoreInfo updates a user's additional profile information.
+	UpdateMoreInfo(ctx context.Context, uin uint32, info state.ICQMoreInfo) error
+	// UpdatePermissions updates a user's permission settings.
+	UpdatePermissions(ctx context.Context, uin uint32, info state.ICQPermissions) error
 }
 
 // sendAck sends an acknowledgment packet to the session using V2 packet format.

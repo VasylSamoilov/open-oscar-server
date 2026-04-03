@@ -1,12 +1,15 @@
 package icq_legacy
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
 	"strconv"
+
+	"github.com/mk6i/open-oscar-server/state"
 )
 
 // V4Handler handles ICQ V4 protocol packets
@@ -772,6 +775,11 @@ func (h *V4Handler) handleContactList(session *LegacySession, seq1, seq2 uint16,
 	// Also notify contacts that THIS user is now online
 	h.notifyContactsUserOnline(session)
 
+	// Notify OSCAR clients that this legacy user is online
+	if err := h.service.NotifyUserOnline(ctx, session.UIN, session.GetStatus()); err != nil {
+		h.logger.Debug("V4 failed to notify OSCAR clients of online", "uin", session.UIN, "err", err)
+	}
+
 	// 5. Send contact list done using packet builder
 	return h.sender.SendToSession(session, h.packetBuilder.BuildContactListDone(session.NextServerSeqNum(), seq2, session.UIN))
 }
@@ -1336,21 +1344,39 @@ func (h *V4Handler) handleUpdateBasic(session *LegacySession, seq1, seq2 uint16,
 
 	h.sendAck(session.Addr, seq1, seq2, uin)
 
-	h.logger.Debug("V4 update basic info", "uin", uin, "data_len", len(data))
+	// Parse: NICK_LEN(2)+NICK + FNAME_LEN(2)+FNAME + LNAME_LEN(2)+LNAME + EMAIL_LEN(2)+EMAIL + AUTH(1)
+	if len(data) >= 4 {
+		r := bytes.NewReader(data)
+		alias, _ := ParseLegacyString(r, true)
+		first, _ := ParseLegacyString(r, true)
+		last, _ := ParseLegacyString(r, true)
+		email, _ := ParseLegacyString(r, true)
+		var auth uint8
+		binary.Read(r, binary.LittleEndian, &auth)
 
-	// Parse the fields - same as V2 but without subsequence prefix
-	// For now, just acknowledge success (data persistence is TODO)
-	// Send V4-specific success response (0x01E0)
+		ctx := context.Background()
+		info := state.ICQBasicInfo{
+			Nickname:     alias,
+			FirstName:    first,
+			LastName:     last,
+			EmailAddress: email,
+		}
+		if err := h.service.UpdateBasicInfo(ctx, uin, info); err != nil {
+			h.logger.Error("V4 update basic failed", "uin", uin, "err", err)
+		}
+		if err := h.service.SetAuthMode(ctx, uin, auth == 1); err != nil {
+			h.logger.Error("V4 set auth mode failed", "uin", uin, "err", err)
+		}
+	}
+
 	pkt := make([]byte, 16)
 	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvUpdatedBasicV4) // 0x01E0
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvUpdatedBasicV4)
 	binary.LittleEndian.PutUint16(pkt[4:6], session.NextServerSeqNum())
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], session.UIN)
-
 	checkcode := h.calculateV4Checkcode(pkt)
 	binary.LittleEndian.PutUint32(pkt[12:16], checkcode)
-
 	return h.sender.SendToSession(session, pkt)
 }
 
@@ -1369,20 +1395,60 @@ func (h *V4Handler) handleUpdateDetail(session *LegacySession, seq1, seq2 uint16
 
 	h.sendAck(session.Addr, seq1, seq2, uin)
 
-	h.logger.Debug("V4 update detail info", "uin", uin, "data_len", len(data))
+	// Parse: CITY_LEN(2)+CITY + COUNTRY(2) + TIMEZONE(1) + STATE_LEN(2)+STATE +
+	//        AGE(2) + SEX(1) + PHONE_LEN(2)+PHONE + HOMEPAGE_LEN(2)+HOMEPAGE +
+	//        ABOUT_LEN(2)+ABOUT + ZIPCODE(4)
+	if len(data) >= 4 {
+		r := bytes.NewReader(data)
+		city, _ := ParseLegacyString(r, true)
+		var country uint16
+		binary.Read(r, binary.LittleEndian, &country)
+		var timezone uint8
+		binary.Read(r, binary.LittleEndian, &timezone)
+		st, _ := ParseLegacyString(r, true)
+		var age uint16
+		binary.Read(r, binary.LittleEndian, &age)
+		var sex uint8
+		binary.Read(r, binary.LittleEndian, &sex)
+		phone, _ := ParseLegacyString(r, true)
+		homepage, _ := ParseLegacyString(r, true)
+		about, _ := ParseLegacyString(r, true)
 
-	// Parse the fields (data persistence is TODO)
-	// Send success response (0x00C8 - same as V2 for detail updates)
+		ctx := context.Background()
+		// Read existing basic info to avoid overwriting nick/first/last/email
+		existing, err := h.service.GetFullUserInfo(ctx, uin)
+		if err == nil && existing != nil {
+			existing.ICQBasicInfo.City = city
+			existing.ICQBasicInfo.CountryCode = country
+			existing.ICQBasicInfo.State = st
+			existing.ICQBasicInfo.Phone = phone
+			if err := h.service.UpdateBasicInfo(ctx, uin, existing.ICQBasicInfo); err != nil {
+				h.logger.Error("V4 update detail basic failed", "uin", uin, "err", err)
+			}
+		}
+		// Merge more info to avoid overwriting birthday/languages
+		if existing != nil {
+			existing.ICQMoreInfo.Gender = uint16(sex)
+			existing.ICQMoreInfo.HomePageAddr = homepage
+			if err := h.service.UpdateMoreInfo(ctx, uin, existing.ICQMoreInfo); err != nil {
+				h.logger.Error("V4 update detail more failed", "uin", uin, "err", err)
+			}
+		}
+		if about != "" {
+			if err := h.service.SetNotes(ctx, uin, about); err != nil {
+				h.logger.Error("V4 update detail about failed", "uin", uin, "err", err)
+			}
+		}
+	}
+
 	pkt := make([]byte, 16)
 	binary.LittleEndian.PutUint16(pkt[0:2], ICQLegacyVersionV3)
-	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvUpdatedDetail) // 0x00C8
+	binary.LittleEndian.PutUint16(pkt[2:4], ICQLegacySrvUpdatedDetail)
 	binary.LittleEndian.PutUint16(pkt[4:6], session.NextServerSeqNum())
 	binary.LittleEndian.PutUint16(pkt[6:8], seq2)
 	binary.LittleEndian.PutUint32(pkt[8:12], session.UIN)
-
 	checkcode := h.calculateV4Checkcode(pkt)
 	binary.LittleEndian.PutUint32(pkt[12:16], checkcode)
-
 	return h.sender.SendToSession(session, pkt)
 }
 

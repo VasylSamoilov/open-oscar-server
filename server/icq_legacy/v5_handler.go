@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mk6i/open-oscar-server/state"
+	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // V5Handler handles ICQ V5 protocol packets
@@ -493,6 +494,11 @@ func (h *V5Handler) handleContactList(session *LegacySession, pkt *V5ClientPacke
 	// This is the key fix - we need to tell contacts who have us in their list
 	h.notifyContactsUserOnline(session)
 
+	// Notify OSCAR clients that this legacy user is online
+	if err := h.service.NotifyUserOnline(ctx, session.UIN, session.GetStatus()); err != nil {
+		h.logger.Debug("V5 failed to notify OSCAR clients of online", "uin", session.UIN, "err", err)
+	}
+
 	// 5. Send contact list done using packet builder
 	return h.sender.SendToSession(session, h.packetBuilder.BuildContactListDone(session, pkt.SeqNum2))
 }
@@ -568,6 +574,12 @@ func (h *V5Handler) handleLogoff(session *LegacySession, pkt *V5ClientPacket) er
 
 	// Notify contacts that this user is going offline BEFORE removing session
 	h.notifyContactsUserOffline(session)
+
+	// Notify OSCAR clients that this user went offline
+	ctx := context.Background()
+	if err := h.service.NotifyUserOffline(ctx, session.UIN); err != nil {
+		h.logger.Debug("V5 failed to notify OSCAR clients of offline", "uin", session.UIN, "err", err)
+	}
 
 	h.sessions.RemoveSession(session.UIN)
 	return nil
@@ -1564,21 +1576,22 @@ func (h *V5Handler) handleMetaLoginInfo(session *LegacySession, pkt *V5ClientPac
 	)
 
 	ctx := context.Background()
-	info, err := h.service.GetUserInfo(ctx, targetUIN)
-	if err != nil || info == nil {
+	user, err := h.service.GetFullUserInfo(ctx, targetUIN)
+	if err != nil || user == nil {
 		h.logger.Info("META login info - NOT FOUND", "target_uin", targetUIN, "err", err)
-		// Send fail response
 		return h.sendMetaFail(session, pkt.SeqNum2, 0x00C8)
 	}
 
+	info, _ := h.service.GetUserInfo(ctx, targetUIN)
+
 	h.logger.Info("META login info - FOUND, sending 7 info packets",
 		"target_uin", targetUIN,
-		"nickname", info.Nickname,
+		"nickname", user.ICQBasicInfo.Nickname,
 	)
 
 	// Send all 7 info packets as per iserverd v5_reply_metafullinfo_request2()
-	h.sendMetaInfo3(session, pkt.SeqNum2, info)        // Basic info (0x00C8)
-	h.sendMetaMore2(session, pkt.SeqNum2, info)        // More info (0x00DC)
+	h.sendMetaInfo3(session, pkt.SeqNum2, user)        // Basic info (0x00C8)
+	h.sendMetaMore2(session, pkt.SeqNum2, user)        // More info (0x00DC)
 	h.sendMetaHpageCat(session, pkt.SeqNum2, info)     // Homepage category (0x010E)
 	h.sendMetaWork2(session, pkt.SeqNum2, info)        // Work info (0x00D2)
 	h.sendMetaAbout(session, pkt.SeqNum2, info)        // About/notes (0x00E6)
@@ -1591,44 +1604,238 @@ func (h *V5Handler) handleMetaLoginInfo(session *LegacySession, pkt *V5ClientPac
 }
 
 func (h *V5Handler) handleMetaSetBasic(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set basic info", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update basic info
+	ctx := context.Background()
+
+	// V5 0x03E9 format differs from OSCAR 0x03EA: V5 sends 3 email fields
+	// (primary, secondary, old) while OSCAR sends 1. Manual parsing required.
+	r := bytes.NewReader(data)
+
+	nickname, _ := parseLEString(r)
+	firstName, _ := parseLEString(r)
+	lastName, _ := parseLEString(r)
+	primaryEmail, _ := parseLEString(r)
+	// Secondary and old email — skip (not stored in ICQBasicInfo)
+	parseLEString(r) // secondary email
+	parseLEString(r) // old email
+	city, _ := parseLEString(r)
+	st, _ := parseLEString(r)
+	phone, _ := parseLEString(r)
+	fax, _ := parseLEString(r)
+	address, _ := parseLEString(r)
+	cellPhone, _ := parseLEString(r)
+	zip, _ := parseLEString(r)
+	var countryCode uint16
+	binary.Read(r, binary.LittleEndian, &countryCode)
+	var gmtOffset uint8
+	binary.Read(r, binary.LittleEndian, &gmtOffset)
+	var publishEmail uint8
+	binary.Read(r, binary.LittleEndian, &publishEmail)
+
+	info := state.ICQBasicInfo{
+		Nickname:     nickname,
+		FirstName:    firstName,
+		LastName:     lastName,
+		EmailAddress: primaryEmail,
+		City:         city,
+		State:        st,
+		Phone:        phone,
+		Fax:          fax,
+		Address:      address,
+		CellPhone:    cellPhone,
+		ZIPCode:      zip,
+		CountryCode:  countryCode,
+		GMTOffset:    gmtOffset,
+		PublishEmail: publishEmail == wire.ICQUserFlagPublishEmailYes,
+	}
+
+	if err := h.service.UpdateBasicInfo(ctx, pkt.UIN, info); err != nil {
+		h.logger.Error("META set basic failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetBasicAck)
 }
 
+// parseLEString reads a little-endian uint16 length-prefixed null-terminated string.
+func parseLEString(r *bytes.Reader) (string, error) {
+	var length uint16
+	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
+		return "", err
+	}
+	if length == 0 {
+		return "", nil
+	}
+	buf := make([]byte, length)
+	if _, err := r.Read(buf); err != nil {
+		return "", err
+	}
+	// Strip null terminator
+	if len(buf) > 0 && buf[len(buf)-1] == 0 {
+		buf = buf[:len(buf)-1]
+	}
+	return string(buf), nil
+}
+
 func (h *V5Handler) handleMetaSetWork(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set work info", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update work info
+	ctx := context.Background()
+
+	var body wire.ICQ_0x07D0_0x03F3_DBQueryMetaReqSetWorkInfo
+	if err := wire.UnmarshalLE(&body, bytes.NewBuffer(data)); err != nil {
+		h.logger.Debug("META set work parse error", "uin", pkt.UIN, "err", err)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetWorkAck)
+	}
+
+	info := state.ICQWorkInfo{
+		Company:        body.Company,
+		Department:     body.Department,
+		Position:       body.Position,
+		OccupationCode: body.OccupationCode,
+		City:           body.City,
+		State:          body.State,
+		Phone:          body.Phone,
+		Fax:            body.Fax,
+		Address:        body.Address,
+		ZIPCode:        body.ZIP,
+		CountryCode:    body.CountryCode,
+		WebPage:        body.WebPage,
+	}
+
+	if err := h.service.UpdateWorkInfo(ctx, pkt.UIN, info); err != nil {
+		h.logger.Error("META set work failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetWorkAck)
 }
 
 func (h *V5Handler) handleMetaSetMore(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set more info", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update more info
+	ctx := context.Background()
+
+	var body wire.ICQ_0x07D0_0x03FD_DBQueryMetaReqSetMoreInfo
+	if err := wire.UnmarshalLE(&body, bytes.NewBuffer(data)); err != nil {
+		h.logger.Debug("META set more parse error", "uin", pkt.UIN, "err", err)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetMoreAck)
+	}
+
+	info := state.ICQMoreInfo{
+		Gender:       body.Gender,
+		HomePageAddr: body.HomePageAddr,
+		BirthYear:    body.BirthYear,
+		BirthMonth:   body.BirthMonth,
+		BirthDay:     body.BirthDay,
+		Lang1:        body.Lang1,
+		Lang2:        body.Lang2,
+		Lang3:        body.Lang3,
+	}
+
+	if err := h.service.UpdateMoreInfo(ctx, pkt.UIN, info); err != nil {
+		h.logger.Error("META set more failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetMoreAck)
 }
 
 func (h *V5Handler) handleMetaSetAbout(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set about", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update about text
+	ctx := context.Background()
+
+	var body wire.ICQ_0x07D0_0x0406_DBQueryMetaReqSetNotes
+	if err := wire.UnmarshalLE(&body, bytes.NewBuffer(data)); err != nil {
+		h.logger.Debug("META set about parse error", "uin", pkt.UIN, "err", err)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetAboutAck)
+	}
+
+	if err := h.service.SetNotes(ctx, pkt.UIN, body.Notes); err != nil {
+		h.logger.Error("META set about failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetAboutAck)
 }
 
 func (h *V5Handler) handleMetaSetInterests(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set interests", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update interests
+	ctx := context.Background()
+
+	var body wire.ICQ_0x07D0_0x0410_DBQueryMetaReqSetInterests
+	if err := wire.UnmarshalLE(&body, bytes.NewBuffer(data)); err != nil {
+		h.logger.Debug("META set interests parse error", "uin", pkt.UIN, "err", err)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetInterestsAck)
+	}
+
+	if len(body.Interests) != 4 {
+		h.logger.Debug("META set interests: expected 4 interests", "uin", pkt.UIN, "got", len(body.Interests))
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetInterestsAck)
+	}
+
+	info := state.ICQInterests{
+		Code1:    body.Interests[0].Code,
+		Keyword1: body.Interests[0].Keyword,
+		Code2:    body.Interests[1].Code,
+		Keyword2: body.Interests[1].Keyword,
+		Code3:    body.Interests[2].Code,
+		Keyword3: body.Interests[2].Keyword,
+		Code4:    body.Interests[3].Code,
+		Keyword4: body.Interests[3].Keyword,
+	}
+
+	if err := h.service.SetInterests(ctx, pkt.UIN, info); err != nil {
+		h.logger.Error("META set interests failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetInterestsAck)
 }
 
 func (h *V5Handler) handleMetaSetAffiliations(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set affiliations", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update affiliations
+	ctx := context.Background()
+
+	var body wire.ICQ_0x07D0_0x041A_DBQueryMetaReqSetAffiliations
+	if err := wire.UnmarshalLE(&body, bytes.NewBuffer(data)); err != nil {
+		h.logger.Debug("META set affiliations parse error", "uin", pkt.UIN, "err", err)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetAffilAck)
+	}
+
+	if len(body.PastAffiliations) != 3 || len(body.Affiliations) != 3 {
+		h.logger.Debug("META set affiliations: expected 3+3", "uin", pkt.UIN,
+			"past", len(body.PastAffiliations), "current", len(body.Affiliations))
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetAffilAck)
+	}
+
+	info := state.ICQAffiliations{
+		PastCode1:       body.PastAffiliations[0].Code,
+		PastKeyword1:    body.PastAffiliations[0].Keyword,
+		PastCode2:       body.PastAffiliations[1].Code,
+		PastKeyword2:    body.PastAffiliations[1].Keyword,
+		PastCode3:       body.PastAffiliations[2].Code,
+		PastKeyword3:    body.PastAffiliations[2].Keyword,
+		CurrentCode1:    body.Affiliations[0].Code,
+		CurrentKeyword1: body.Affiliations[0].Keyword,
+		CurrentCode2:    body.Affiliations[1].Code,
+		CurrentKeyword2: body.Affiliations[1].Keyword,
+		CurrentCode3:    body.Affiliations[2].Code,
+		CurrentKeyword3: body.Affiliations[2].Keyword,
+	}
+
+	if err := h.service.SetAffiliations(ctx, pkt.UIN, info); err != nil {
+		h.logger.Error("META set affiliations failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetAffilAck)
 }
 
 func (h *V5Handler) handleMetaSetSecurity(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set security", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update security settings
+	ctx := context.Background()
+
+	var body wire.ICQ_0x07D0_0x0424_DBQueryMetaReqSetPermissions
+	if err := wire.UnmarshalLE(&body, bytes.NewBuffer(data)); err != nil {
+		h.logger.Debug("META set security parse error", "uin", pkt.UIN, "err", err)
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetSecureAck)
+	}
+
+	info := state.ICQPermissions{
+		AuthRequired: body.Authorization == 1,
+		WebAware:     body.WebAware == 1,
+	}
+
+	if err := h.service.UpdatePermissions(ctx, pkt.UIN, info); err != nil {
+		h.logger.Error("META set security failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetSecureAck)
 }
 
@@ -1688,8 +1895,35 @@ func (h *V5Handler) handleMetaSetPassword(session *LegacySession, pkt *V5ClientP
 // handleMetaSetHPCat processes set homepage category (0x0442)
 // From iserverd v5_set_hpcat_info()
 func (h *V5Handler) handleMetaSetHPCat(session *LegacySession, pkt *V5ClientPacket, data []byte) error {
-	h.logger.Info("META set homepage category", "uin", pkt.UIN, "data_len", len(data), "status", "ack_sent")
-	// TODO: Parse and update homepage category
+	ctx := context.Background()
+
+	// Format from iserverd v5_set_hpcat_info(): ENABLED(1) + INDEX(2) + DESC_LEN(2) + DESC
+	if len(data) < 5 {
+		h.logger.Debug("META set hpcat data too short", "uin", pkt.UIN, "len", len(data))
+		return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetHPCatAck)
+	}
+
+	enabled := data[0] == 1
+	index := binary.LittleEndian.Uint16(data[1:3])
+	descLen := binary.LittleEndian.Uint16(data[3:5])
+	desc := ""
+	if descLen > 0 && 5+int(descLen) <= len(data) {
+		desc = string(data[5 : 5+int(descLen)])
+		if len(desc) > 0 && desc[len(desc)-1] == 0 {
+			desc = desc[:len(desc)-1]
+		}
+	}
+
+	info := state.ICQHomepageCategory{
+		Enabled:     enabled,
+		Index:       index,
+		Description: desc,
+	}
+
+	if err := h.service.SetHomepageCategory(ctx, pkt.UIN, info); err != nil {
+		h.logger.Error("META set hpcat failed", "uin", pkt.UIN, "err", err)
+	}
+
 	return h.sendMetaAck(session, pkt.SeqNum2, ICQLegacySrvMetaSetHPCatAck)
 }
 
@@ -1771,21 +2005,23 @@ func (h *V5Handler) handleMetaUserFullInfo(session *LegacySession, pkt *V5Client
 	)
 
 	ctx := context.Background()
-	info, err := h.service.GetUserInfo(ctx, targetUIN)
-	if err != nil || info == nil {
+	user, err := h.service.GetFullUserInfo(ctx, targetUIN)
+	if err != nil || user == nil {
 		h.logger.Info("META user full info - NOT FOUND", "target_uin", targetUIN, "err", err)
 		return h.sendMetaFail(session, pkt.SeqNum2, ICQLegacySrvMetaUserInfo2)
 	}
 
+	info, _ := h.service.GetUserInfo(ctx, targetUIN)
+
 	h.logger.Info("META user full info - FOUND, sending 7 info packets (older format)",
 		"target_uin", targetUIN,
-		"nickname", info.Nickname,
+		"nickname", user.ICQBasicInfo.Nickname,
 	)
 
 	// Send all 7 info packets as per iserverd v5_reply_metafullinfo_request()
 	// Uses older format: sendMetaFullUserInfo (info2), sendMetaMore, sendMetaWork
 	h.sendMetaFullUserInfo(session, pkt.SeqNum2, info) // Basic info (0x00C8) - older format
-	h.sendMetaMore(session, pkt.SeqNum2, info)         // More info (0x00DC)
+	h.sendMetaMore(session, pkt.SeqNum2, user)         // More info (0x00DC)
 	h.sendMetaHpageCat(session, pkt.SeqNum2, info)     // Homepage category (0x010E)
 	h.sendMetaWork(session, pkt.SeqNum2, info)         // Work info (0x00D2) - older format
 	h.sendMetaAbout(session, pkt.SeqNum2, info)        // About/notes (0x00E6)
@@ -1818,21 +2054,23 @@ func (h *V5Handler) handleMetaUserFullInfo2(session *LegacySession, pkt *V5Clien
 	)
 
 	ctx := context.Background()
-	info, err := h.service.GetUserInfo(ctx, targetUIN)
-	if err != nil || info == nil {
+	user, err := h.service.GetFullUserInfo(ctx, targetUIN)
+	if err != nil || user == nil {
 		h.logger.Info("META user full info2 - NOT FOUND", "target_uin", targetUIN, "err", err)
 		return h.sendMetaFail(session, pkt.SeqNum2, ICQLegacySrvMetaUserInfo2)
 	}
 
+	info, _ := h.service.GetUserInfo(ctx, targetUIN)
+
 	h.logger.Info("META user full info2 - FOUND, sending 7 info packets (newer format)",
 		"target_uin", targetUIN,
-		"nickname", info.Nickname,
+		"nickname", user.ICQBasicInfo.Nickname,
 	)
 
 	// Send all 7 info packets as per iserverd v5_reply_metafullinfo_request2()
 	// Uses newer format: sendMetaInfo3, sendMetaMore2, sendMetaWork2
-	h.sendMetaInfo3(session, pkt.SeqNum2, info)        // Basic info (0x00C8) - newer format
-	h.sendMetaMore2(session, pkt.SeqNum2, info)        // More info (0x00DC)
+	h.sendMetaInfo3(session, pkt.SeqNum2, user)        // Basic info (0x00C8) - newer format
+	h.sendMetaMore2(session, pkt.SeqNum2, user)        // More info (0x00DC)
 	h.sendMetaHpageCat(session, pkt.SeqNum2, info)     // Homepage category (0x010E)
 	h.sendMetaWork2(session, pkt.SeqNum2, info)        // Work info (0x00D2) - newer format
 	h.sendMetaAbout(session, pkt.SeqNum2, info)        // About/notes (0x00E6)
@@ -2946,34 +3184,42 @@ func (h *V5Handler) sendMetaFail(session *LegacySession, seq2 uint16, subCommand
 
 // sendMetaInfo3 sends basic user info (SRV_META_USER_INFO2 = 0x00C8)
 // From iserverd v5_send_meta_info3()
-func (h *V5Handler) sendMetaInfo3(session *LegacySession, seq2 uint16, info *LegacyUserSearchResult) error {
-	if session == nil || info == nil {
+func (h *V5Handler) sendMetaInfo3(session *LegacySession, seq2 uint16, user *state.User) error {
+	if session == nil || user == nil {
 		return nil
 	}
 
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, uint16(0x00C8)) // SRV_META_USER_INFO2
 	buf.WriteByte(0x0A)                                    // success
-	writeLegacyString(buf, info.Nickname)
-	writeLegacyString(buf, info.FirstName)
-	writeLegacyString(buf, info.LastName)
-	writeLegacyString(buf, info.Email)                // email1
-	writeLegacyString(buf, "")                        // email2
-	writeLegacyString(buf, "")                        // email3
-	writeLegacyString(buf, "")                        // hcity
-	writeLegacyString(buf, "")                        // hstate
-	writeLegacyString(buf, "")                        // hphone
-	writeLegacyString(buf, "")                        // hfax
-	writeLegacyString(buf, "")                        // haddr
-	writeLegacyString(buf, "")                        // hcell
-	writeLegacyString(buf, "")                        // hzip (string in info3)
-	binary.Write(buf, binary.LittleEndian, uint16(0)) // hcountry
-	binary.Write(buf, binary.LittleEndian, uint16(0)) // gmt_offset
-	buf.WriteByte(0x01)                               // auth
-	buf.WriteByte(0x00)                               // e1publ
-	buf.WriteByte(0x00)                               // unknown
-	buf.WriteByte(0x00)                               // unknown
-	buf.WriteByte(0x00)                               // unknown
+	writeLegacyString(buf, user.ICQBasicInfo.Nickname)
+	writeLegacyString(buf, user.ICQBasicInfo.FirstName)
+	writeLegacyString(buf, user.ICQBasicInfo.LastName)
+	writeLegacyString(buf, user.ICQBasicInfo.EmailAddress) // email1
+	writeLegacyString(buf, "")                             // email2 (secondary)
+	writeLegacyString(buf, "")                             // email3 (old)
+	writeLegacyString(buf, user.ICQBasicInfo.City)
+	writeLegacyString(buf, user.ICQBasicInfo.State)
+	writeLegacyString(buf, user.ICQBasicInfo.Phone)
+	writeLegacyString(buf, user.ICQBasicInfo.Fax)
+	writeLegacyString(buf, user.ICQBasicInfo.Address)
+	writeLegacyString(buf, user.ICQBasicInfo.CellPhone)
+	writeLegacyString(buf, user.ICQBasicInfo.ZIPCode)
+	binary.Write(buf, binary.LittleEndian, user.ICQBasicInfo.CountryCode)
+	binary.Write(buf, binary.LittleEndian, uint16(user.ICQBasicInfo.GMTOffset))
+	authFlag := uint8(0)
+	if user.ICQPermissions.AuthRequired {
+		authFlag = 1
+	}
+	buf.WriteByte(authFlag)
+	publishFlag := uint8(0)
+	if !user.ICQBasicInfo.PublishEmail {
+		publishFlag = 1
+	}
+	buf.WriteByte(publishFlag)
+	buf.WriteByte(0x00) // unknown
+	buf.WriteByte(0x00) // unknown
+	buf.WriteByte(0x00) // unknown
 
 	pkt := &V5ServerPacket{
 		Version:   ICQLegacyVersionV5,
@@ -3008,32 +3254,32 @@ func (h *V5Handler) sendMetaInfo3(session *LegacySession, seq2 uint16, info *Leg
 // - lang1(1)
 // - lang2(1)
 // - lang3(1)
-func (h *V5Handler) sendMetaMore(session *LegacySession, seq2 uint16, info *LegacyUserSearchResult) error {
-	if session == nil || info == nil {
+func (h *V5Handler) sendMetaMore(session *LegacySession, seq2 uint16, user *state.User) error {
+	if session == nil || user == nil {
 		return nil
 	}
 
 	// Calculate birth year as single byte (year - 1900)
 	// From iserverd: if (tuser.byear < 1900) {temp_year = tuser.byear;} else {temp_year = tuser.byear - 1900;};
 	var tempYear uint8
-	if info.BirthYear < 1900 {
-		tempYear = uint8(info.BirthYear)
+	if user.ICQMoreInfo.BirthYear < 1900 {
+		tempYear = uint8(user.ICQMoreInfo.BirthYear)
 	} else {
-		tempYear = uint8(info.BirthYear - 1900)
+		tempYear = uint8(user.ICQMoreInfo.BirthYear - 1900)
 	}
 
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaInfoMore) // SRV_META_INFO_MORE = 0x00DC
 	buf.WriteByte(0x0A)                                              // success
-	binary.Write(buf, binary.LittleEndian, uint16(info.Age))         // age(2)
-	buf.WriteByte(info.Gender)                                       // gender(1)
-	writeLegacyString(buf, info.Homepage)                            // homepage_len(2) + homepage
+	binary.Write(buf, binary.LittleEndian, user.Age(time.Now))       // age(2)
+	buf.WriteByte(uint8(user.ICQMoreInfo.Gender))                    // gender(1)
+	writeLegacyString(buf, user.ICQMoreInfo.HomePageAddr)            // homepage_len(2) + homepage
 	buf.WriteByte(tempYear)                                          // byear(1) - year minus 1900
-	buf.WriteByte(info.BirthMonth)                                   // bmonth(1)
-	buf.WriteByte(info.BirthDay)                                     // bday(1)
-	buf.WriteByte(info.Lang1)                                        // lang1(1)
-	buf.WriteByte(info.Lang2)                                        // lang2(1)
-	buf.WriteByte(info.Lang3)                                        // lang3(1)
+	buf.WriteByte(user.ICQMoreInfo.BirthMonth)                       // bmonth(1)
+	buf.WriteByte(user.ICQMoreInfo.BirthDay)                         // bday(1)
+	buf.WriteByte(user.ICQMoreInfo.Lang1)                            // lang1(1)
+	buf.WriteByte(user.ICQMoreInfo.Lang2)                            // lang2(1)
+	buf.WriteByte(user.ICQMoreInfo.Lang3)                            // lang3(1)
 
 	pkt := &V5ServerPacket{
 		Version:   ICQLegacyVersionV5,
@@ -3068,23 +3314,23 @@ func (h *V5Handler) sendMetaMore(session *LegacySession, seq2 uint16, info *Lega
 // - lang1(1)
 // - lang2(1)
 // - lang3(1)
-func (h *V5Handler) sendMetaMore2(session *LegacySession, seq2 uint16, info *LegacyUserSearchResult) error {
-	if session == nil || info == nil {
+func (h *V5Handler) sendMetaMore2(session *LegacySession, seq2 uint16, user *state.User) error {
+	if session == nil || user == nil {
 		return nil
 	}
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaInfoMore) // SRV_META_INFO_MORE = 0x00DC
-	buf.WriteByte(0x0A)                                              // success
-	binary.Write(buf, binary.LittleEndian, uint16(info.Age))         // age(2)
-	buf.WriteByte(info.Gender)                                       // gender(1)
-	writeLegacyString(buf, info.Homepage)                            // homepage_len(2) + homepage
-	binary.Write(buf, binary.LittleEndian, uint16(info.BirthYear))   // byear(2) - full year
-	buf.WriteByte(info.BirthMonth)                                   // bmonth(1)
-	buf.WriteByte(info.BirthDay)                                     // bday(1)
-	buf.WriteByte(info.Lang1)                                        // lang1(1)
-	buf.WriteByte(info.Lang2)                                        // lang2(1)
-	buf.WriteByte(info.Lang3)                                        // lang3(1)
+	binary.Write(buf, binary.LittleEndian, ICQLegacySrvMetaInfoMore)   // SRV_META_INFO_MORE = 0x00DC
+	buf.WriteByte(0x0A)                                                // success
+	binary.Write(buf, binary.LittleEndian, user.Age(time.Now))         // age(2)
+	buf.WriteByte(uint8(user.ICQMoreInfo.Gender))                      // gender(1)
+	writeLegacyString(buf, user.ICQMoreInfo.HomePageAddr)              // homepage_len(2) + homepage
+	binary.Write(buf, binary.LittleEndian, user.ICQMoreInfo.BirthYear) // byear(2) - full year
+	buf.WriteByte(user.ICQMoreInfo.BirthMonth)                         // bmonth(1)
+	buf.WriteByte(user.ICQMoreInfo.BirthDay)                           // bday(1)
+	buf.WriteByte(user.ICQMoreInfo.Lang1)                              // lang1(1)
+	buf.WriteByte(user.ICQMoreInfo.Lang2)                              // lang2(1)
+	buf.WriteByte(user.ICQMoreInfo.Lang3)                              // lang3(1)
 
 	pkt := &V5ServerPacket{
 		Version:   ICQLegacyVersionV5,

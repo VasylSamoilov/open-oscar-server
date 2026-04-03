@@ -2,6 +2,7 @@ package icq_legacy
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
@@ -24,14 +25,16 @@ import (
 type LegacyMessageBridge struct {
 	sessions   *LegacySessionManager
 	dispatcher *ProtocolDispatcher
+	userFinder ICQUserFinder
 	logger     *slog.Logger
 }
 
 // NewLegacyMessageBridge creates a new bridge for OSCAR->legacy message delivery.
-func NewLegacyMessageBridge(sessions *LegacySessionManager, dispatcher *ProtocolDispatcher, logger *slog.Logger) *LegacyMessageBridge {
+func NewLegacyMessageBridge(sessions *LegacySessionManager, dispatcher *ProtocolDispatcher, userFinder ICQUserFinder, logger *slog.Logger) *LegacyMessageBridge {
 	return &LegacyMessageBridge{
 		sessions:   sessions,
 		dispatcher: dispatcher,
+		userFinder: userFinder,
 		logger:     logger,
 	}
 }
@@ -91,19 +94,40 @@ func (b *LegacyMessageBridge) SendUserOffline(uin uint32, targetUIN uint32) erro
 //   - ICBMChannelMsgToClient -> SendOnlineMessage (OSCAR->legacy IM delivery)
 func (b *LegacyMessageBridge) StartOSCARMessagePump(session *LegacySession) {
 	if session == nil || session.Instance == nil {
+		b.logger.Warn("StartOSCARMessagePump: nil session or instance, pump NOT started")
 		return
 	}
 
+	b.logger.Info("StartOSCARMessagePump: starting pump",
+		"uin", session.UIN,
+		"version", session.Version,
+		"instance_closed", session.Instance.Closed() == nil,
+	)
+
 	go func() {
 		instance := session.Instance
+		b.logger.Info("OSCAR message pump goroutine started",
+			"uin", session.UIN,
+		)
 		for {
 			select {
 			case <-instance.Closed():
+				b.logger.Info("OSCAR message pump: instance closed, exiting",
+					"uin", session.UIN,
+				)
 				return
 			case msg, ok := <-instance.ReceiveMessage():
 				if !ok {
+					b.logger.Info("OSCAR message pump: channel closed, exiting",
+						"uin", session.UIN,
+					)
 					return
 				}
+				b.logger.Info("OSCAR message pump: received SNAC",
+					"uin", session.UIN,
+					"food_group", msg.Frame.FoodGroup,
+					"sub_group", msg.Frame.SubGroup,
+				)
 				b.handleOSCARMessage(session, msg)
 			}
 		}
@@ -153,12 +177,28 @@ func (b *LegacyMessageBridge) handleBuddyArrived(session *LegacySession, msg wir
 		"legacy_status", fmt.Sprintf("0x%08X", legacyStatus),
 	)
 
-	if err := b.dispatcher.SendUserOnline(session, uin, legacyStatus); err != nil {
-		b.logger.Debug("failed to send user online to legacy client",
-			"to_uin", session.UIN,
-			"online_uin", uin,
-			"err", err,
-		)
+	// Use SendUserOnline for the first arrival, SendStatusChange for
+	// subsequent status updates. V5 clients use different packet types
+	// (SRV_USER_ONLINE vs SRV_USER_STATUS) and only update the status
+	// icon when the correct packet type is used.
+	if session.MarkContactOnline(uin) {
+		// Already known online — this is a status change
+		if err := b.dispatcher.SendStatusChange(session, uin, legacyStatus); err != nil {
+			b.logger.Debug("failed to send status change to legacy client",
+				"to_uin", session.UIN,
+				"changed_uin", uin,
+				"err", err,
+			)
+		}
+	} else {
+		// First time seeing this contact online
+		if err := b.dispatcher.SendUserOnline(session, uin, legacyStatus); err != nil {
+			b.logger.Debug("failed to send user online to legacy client",
+				"to_uin", session.UIN,
+				"online_uin", uin,
+				"err", err,
+			)
+		}
 	}
 }
 
@@ -184,6 +224,8 @@ func (b *LegacyMessageBridge) handleBuddyDeparted(session *LegacySession, msg wi
 		"departed_uin", uin,
 	)
 
+	session.MarkContactOffline(uin)
+
 	if err := b.dispatcher.SendUserOffline(session, uin); err != nil {
 		b.logger.Debug("failed to send user offline to legacy client",
 			"to_uin", session.UIN,
@@ -200,32 +242,128 @@ func (b *LegacyMessageBridge) handleBuddyDeparted(session *LegacySession, msg wi
 func (b *LegacyMessageBridge) handleICBMMessage(session *LegacySession, msg wire.SNACMessage) {
 	clientMsg, ok := msg.Body.(wire.SNAC_0x04_0x07_ICBMChannelMsgToClient)
 	if !ok {
+		b.logger.Warn("handleICBMMessage: body type assertion failed",
+			"uin", session.UIN,
+			"body_type", fmt.Sprintf("%T", msg.Body),
+		)
 		return
 	}
 
-	// Only handle channel 1 (IM) messages
-	if clientMsg.ChannelID != wire.ICBMChannelIM {
+	b.logger.Debug("handleICBMMessage: received",
+		"uin", session.UIN,
+		"channel_id", clientMsg.ChannelID,
+		"from_screen_name", clientMsg.TLVUserInfo.ScreenName,
+		"tlv_count", len(clientMsg.TLVRestBlock.TLVList),
+	)
+
+	// Handle channel 1 (IM) and channel 4 (ICQ) messages
+	// ICQ 2003b and later send ICQ-to-ICQ messages on channel 4
+	if clientMsg.ChannelID != wire.ICBMChannelIM && clientMsg.ChannelID != wire.ICBMChannelICQ {
+		b.logger.Debug("handleICBMMessage: skipping unsupported channel",
+			"uin", session.UIN,
+			"channel_id", clientMsg.ChannelID,
+		)
 		return
 	}
 
 	fromUIN, ok := parseUIN(clientMsg.TLVUserInfo.ScreenName)
 	if !ok {
+		b.logger.Debug("handleICBMMessage: parseUIN failed",
+			"uin", session.UIN,
+			"screen_name", clientMsg.TLVUserInfo.ScreenName,
+		)
 		return // AIM screen name - can't represent as legacy UIN
 	}
 
-	// Extract message text from ICBM TLVs, handling charset conversion
-	text := extractAndConvertICBMText(clientMsg)
+	// Extract message text and type from ICBM TLVs
+	var msgType uint16
+	var text string
+
+	if clientMsg.ChannelID == wire.ICBMChannelICQ {
+		// Channel 4: extract ICBMCh4Message which has message type
+		payload, hasPayload := clientMsg.Bytes(wire.ICBMTLVData)
+		if hasPayload {
+			ch4Msg := wire.ICBMCh4Message{}
+			if err := wire.UnmarshalLE(&ch4Msg, bytes.NewBuffer(payload)); err == nil {
+				msgType = uint16(ch4Msg.MessageType)
+				text = ch4Msg.Message
+
+				// For auth messages from OSCAR, wrap reason text in FE-delimited
+				// format that legacy clients expect:
+				// nick\xFEfirst\xFElast\xFEemail\xFEauth\xFEreason
+				switch msgType {
+				case ICQLegacyMsgAuthReq, ICQLegacyMsgAuthDeny, ICQLegacyMsgAuthGrant, ICQLegacyMsgAdded:
+					// Look up sender's profile for the FE fields
+					nick := fmt.Sprintf("%d", fromUIN)
+					firstName := ""
+					lastName := ""
+					email := ""
+					if user, err := b.userFinder.FindByUIN(context.Background(), fromUIN); err == nil {
+						if user.ICQBasicInfo.Nickname != "" {
+							nick = user.ICQBasicInfo.Nickname
+						}
+						firstName = user.ICQBasicInfo.FirstName
+						lastName = user.ICQBasicInfo.LastName
+						email = user.ICQBasicInfo.EmailAddress
+					}
+
+					// Truncate fields to legacy ICQ limits
+					if len(nick) > 20 {
+						nick = nick[:20]
+					}
+					if len(firstName) > 30 {
+						firstName = firstName[:30]
+					}
+					if len(lastName) > 30 {
+						lastName = lastName[:30]
+					}
+					if len(email) > 50 {
+						email = email[:50]
+					}
+
+					reason := ch4Msg.Message
+					switch msgType {
+					case ICQLegacyMsgAuthReq:
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE1\xFE%s", nick, firstName, lastName, email, reason)
+					case ICQLegacyMsgAuthDeny:
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE%s", nick, firstName, lastName, email, reason)
+					case ICQLegacyMsgAuthGrant:
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE", nick, firstName, lastName, email)
+					case ICQLegacyMsgAdded:
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE0", nick, firstName, lastName, email)
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to channel 1 text extraction
 	if text == "" {
+		text = extractAndConvertICBMText(clientMsg)
+		msgType = ICQLegacyMsgText
+	}
+
+	if text == "" && msgType == 0 {
+		b.logger.Debug("handleICBMMessage: no message content",
+			"uin", session.UIN,
+			"from_uin", fromUIN,
+		)
 		return
+	}
+
+	// For auth grant (0x08), text may be empty — that's OK
+	if msgType == 0 {
+		msgType = ICQLegacyMsgText
 	}
 
 	b.logger.Debug("OSCAR->legacy ICBM message",
 		"to_uin", session.UIN,
 		"from_uin", fromUIN,
+		"msg_type", fmt.Sprintf("0x%04X", msgType),
 		"text_len", len(text),
 	)
 
-	if err := b.dispatcher.SendOnlineMessage(session, fromUIN, ICQLegacyMsgText, text); err != nil {
+	if err := b.dispatcher.SendOnlineMessage(session, fromUIN, msgType, text); err != nil {
 		b.logger.Debug("failed to deliver ICBM to legacy client",
 			"to_uin", session.UIN,
 			"from_uin", fromUIN,
@@ -275,8 +413,16 @@ func parseUIN(screenName string) (uint32, bool) {
 func oscarStatusToLegacy(oscarStatus uint32) uint32 {
 	var legacyStatus uint32
 
-	// Map the base status (lower byte)
-	switch oscarStatus & 0xFF {
+	// ICQ 2003b sends combined status bits:
+	//   Available  = 0x00
+	//   FFC        = 0x20
+	//   Away       = 0x01
+	//   N/A        = 0x05 (Away|Out)
+	//   Occupied   = 0x11 (Away|Busy)
+	//   DND        = 0x13 (Away|DND|Busy)
+	// Match exact combined values first, then fall back to bitmask.
+	statusByte := oscarStatus & 0xFF
+	switch statusByte {
 	case 0x00:
 		legacyStatus = ICQLegacyStatusOnline
 	case 0x01:
@@ -285,12 +431,34 @@ func oscarStatusToLegacy(oscarStatus uint32) uint32 {
 		legacyStatus = ICQLegacyStatusDND
 	case 0x04:
 		legacyStatus = ICQLegacyStatusNA
+	case 0x05: // Away|Out -> N/A
+		legacyStatus = ICQLegacyStatusNA
 	case 0x10:
 		legacyStatus = ICQLegacyStatusOccupied
+	case 0x11: // Away|Busy -> Occupied
+		legacyStatus = ICQLegacyStatusOccupied
+	case 0x13: // Away|DND|Busy -> DND
+		legacyStatus = ICQLegacyStatusDND
 	case 0x20:
 		legacyStatus = ICQLegacyStatusFFC
 	default:
-		legacyStatus = ICQLegacyStatusOnline
+		// Fallback: check bits from most to least specific
+		switch {
+		case statusByte&0x20 != 0:
+			legacyStatus = ICQLegacyStatusFFC
+		case statusByte&0x02 != 0 && statusByte&0x10 != 0:
+			legacyStatus = ICQLegacyStatusDND
+		case statusByte&0x10 != 0:
+			legacyStatus = ICQLegacyStatusOccupied
+		case statusByte&0x04 != 0:
+			legacyStatus = ICQLegacyStatusNA
+		case statusByte&0x02 != 0:
+			legacyStatus = ICQLegacyStatusDND
+		case statusByte&0x01 != 0:
+			legacyStatus = ICQLegacyStatusAway
+		default:
+			legacyStatus = ICQLegacyStatusOnline
+		}
 	}
 
 	// Map flags
@@ -326,6 +494,19 @@ func oscarStatusToLegacy(oscarStatus uint32) uint32 {
 // Unicode, we convert to Latin-1 with best-effort transliteration for
 // characters outside the Latin-1 range.
 func extractAndConvertICBMText(clientMsg wire.SNAC_0x04_0x07_ICBMChannelMsgToClient) string {
+	switch clientMsg.ChannelID {
+	case wire.ICBMChannelIM:
+		return extractChannel1Text(clientMsg)
+	case wire.ICBMChannelICQ:
+		return extractChannel4Text(clientMsg)
+	default:
+		return ""
+	}
+}
+
+// extractChannel1Text extracts text from channel 1 (AIM IM) messages.
+// Format: TLV 0x0002 (AOLIMData) containing ICBM fragments.
+func extractChannel1Text(clientMsg wire.SNAC_0x04_0x07_ICBMChannelMsgToClient) string {
 	payload, hasPayload := clientMsg.Bytes(wire.ICBMTLVAOLIMData)
 	if !hasPayload {
 		return ""
@@ -348,11 +529,8 @@ func extractAndConvertICBMText(clientMsg wire.SNAC_0x04_0x07_ICBMChannelMsgToCli
 
 		switch msg.Charset {
 		case wire.ICBMMessageEncodingUnicode:
-			// UCS-2 big-endian -> Latin-1
 			return ucs2BEToLatin1(msg.Text)
 		default:
-			// ASCII (0x00) or Latin-1 (0x03) - already single-byte.
-			// Strip HTML tags that AIM clients may include.
 			text := string(msg.Text)
 			if strings.Contains(text, "<") {
 				return stripHTMLSimple(text)
@@ -362,6 +540,26 @@ func extractAndConvertICBMText(clientMsg wire.SNAC_0x04_0x07_ICBMChannelMsgToCli
 	}
 
 	return ""
+}
+
+// extractChannel4Text extracts text from channel 4 (ICQ) messages.
+// Format: TLV 0x0005 (ICBMTLVData) containing ICBMCh4Message (little-endian).
+func extractChannel4Text(clientMsg wire.SNAC_0x04_0x07_ICBMChannelMsgToClient) string {
+	payload, hasPayload := clientMsg.Bytes(wire.ICBMTLVData)
+	if !hasPayload {
+		return ""
+	}
+
+	msg := wire.ICBMCh4Message{}
+	if err := wire.UnmarshalLE(&msg, bytes.NewBuffer(payload)); err != nil {
+		return ""
+	}
+
+	text := msg.Message
+	if strings.Contains(text, "<") {
+		return stripHTMLSimple(text)
+	}
+	return text
 }
 
 // ucs2BEToLatin1 converts UCS-2 big-endian encoded bytes to a Latin-1 string.

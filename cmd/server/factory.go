@@ -649,6 +649,8 @@ func ICQLegacy(deps Container) *icq_legacy.LegacyServer {
 		deps.sqLiteUserStore, // userUpdater
 		deps.sqLiteUserStore, // feedbagManager
 		deps.sqLiteUserStore, // relationshipFetcher
+		deps.sqLiteUserStore, // buddyListRegistry
+		deps.sqLiteUserStore, // clientSideBuddyListManager
 		logger,
 	)
 
@@ -701,7 +703,7 @@ func ICQLegacy(deps Container) *icq_legacy.LegacyServer {
 
 	// Wire up OSCAR->legacy message bridge so OSCAR status notifications
 	// reach legacy clients via the session message pump
-	legacyBridge := icq_legacy.NewLegacyMessageBridge(sessionManager, dispatcher, logger)
+	legacyBridge := icq_legacy.NewLegacyMessageBridge(sessionManager, dispatcher, deps.sqLiteUserStore, logger)
 
 	// Set the bridge on the session manager so it can start the OSCAR message
 	// pump for each new legacy session (converts BuddyArrived/Departed SNACs

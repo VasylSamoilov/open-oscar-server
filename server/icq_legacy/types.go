@@ -85,6 +85,11 @@ type LegacySession struct {
 	// Instance links this legacy session to the unified OSCAR session manager.
 	Instance *state.SessionInstance
 
+	// knownOnline tracks contacts that have been reported as online via
+	// SendUserOnline. Subsequent BuddyArrived for the same contact use
+	// SendStatusChange instead, which sends the correct V5 packet type.
+	knownOnline map[uint32]bool
+
 	mu sync.RWMutex
 }
 
@@ -196,6 +201,29 @@ func (s *LegacySession) IsContact(uin uint32) bool {
 	return false
 }
 
+// MarkContactOnline marks a contact as known-online. Returns true if the
+// contact was already known online (i.e. this is a status change, not an
+// initial arrival).
+func (s *LegacySession) MarkContactOnline(uin uint32) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.knownOnline == nil {
+		s.knownOnline = make(map[uint32]bool)
+	}
+	wasOnline := s.knownOnline[uin]
+	s.knownOnline[uin] = true
+	return wasOnline
+}
+
+// MarkContactOffline removes a contact from the known-online set.
+func (s *LegacySession) MarkContactOffline(uin uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.knownOnline != nil {
+		delete(s.knownOnline, uin)
+	}
+}
+
 // GetUIN returns the session's UIN (implements LegacySessionInstance)
 func (s *LegacySession) GetUIN() uint32 {
 	return s.UIN
@@ -301,15 +329,32 @@ type ICQUserUpdater interface {
 	SetHomepageCategory(ctx context.Context, name state.IdentScreenName, data state.ICQHomepageCategory) error
 }
 
-// FeedbagManager provides server-side buddy list access.
+// FeedbagManager provides server-side buddy list access and modification.
 type FeedbagManager interface {
 	Feedbag(ctx context.Context, screenName state.IdentScreenName) ([]wire.FeedbagItem, error)
+	FeedbagUpsert(ctx context.Context, screenName state.IdentScreenName, items []wire.FeedbagItem) error
 }
 
 // RelationshipFetcher provides buddy relationship lookup.
 type RelationshipFetcher interface {
 	AllRelationships(ctx context.Context, me state.IdentScreenName, filter []state.IdentScreenName) ([]state.Relationship, error)
 	Relationship(ctx context.Context, me state.IdentScreenName, them state.IdentScreenName) (state.Relationship, error)
+}
+
+// BuddyListRegistry provides buddy list registration for cross-protocol
+// presence visibility. Legacy sessions must register their buddy list so that
+// OSCAR's BroadcastVisibility/AllRelationships can discover them.
+type BuddyListRegistry interface {
+	RegisterBuddyList(ctx context.Context, user state.IdentScreenName) error
+	UnregisterBuddyList(ctx context.Context, user state.IdentScreenName) error
+}
+
+// ClientSideBuddyListManager provides client-side buddy list management.
+// Legacy ICQ clients use client-side buddy lists (not feedbag), so their
+// contacts must be written to the clientSideBuddyList table for the
+// relationship query to discover them.
+type ClientSideBuddyListManager interface {
+	AddBuddy(ctx context.Context, me state.IdentScreenName, them state.IdentScreenName) error
 }
 
 // LegacySessionInstance represents a legacy session as seen by the service layer.

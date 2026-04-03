@@ -1,11 +1,14 @@
 package icq_legacy
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
+
+	"github.com/mk6i/open-oscar-server/state"
 )
 
 // V3Handler handles ICQ V3 protocol packets
@@ -394,6 +397,12 @@ func (h *V3Handler) handleLogoff(session *LegacySession, seq1, seq2 uint16, uin 
 	// Notify contacts that this user is going offline BEFORE removing session
 	h.notifyContactsUserOffline(session)
 
+	// Notify OSCAR clients that this user went offline
+	ctx := context.Background()
+	if err := h.service.NotifyUserOffline(ctx, uin); err != nil {
+		h.logger.Debug("V3 failed to notify OSCAR clients of offline", "uin", uin, "err", err)
+	}
+
 	h.sessions.RemoveSession(uin)
 	return nil
 }
@@ -475,6 +484,11 @@ func (h *V3Handler) handleContactList(session *LegacySession, seq1, seq2 uint16,
 	// Also notify contacts that THIS user is now online
 	// This is the key fix - we need to tell contacts who have us in their list
 	h.notifyContactsUserOnline(session)
+
+	// Notify OSCAR clients that this legacy user is online
+	if err := h.service.NotifyUserOnline(ctx, session.UIN, session.GetStatus()); err != nil {
+		h.logger.Debug("V3 failed to notify OSCAR clients of online", "uin", session.UIN, "err", err)
+	}
 
 	// 5. Send contact list done using packet builder
 	return h.sender.SendToSession(session, h.packetBuilder.BuildContactListDone(session.NextServerSeqNum(), seq2, session.UIN))
@@ -1002,6 +1016,7 @@ func (h *V3Handler) handleOfflineMsgReq(session *LegacySession, seq1, seq2 uint1
 }
 
 // handleSetBasicInfo processes set basic info (0x050A)
+// Format: TIMESTAMP(4) + NICK_LEN(2)+NICK + FIRST_LEN(2)+FIRST + LAST_LEN(2)+LAST + EMAIL_LEN(2)+EMAIL
 func (h *V3Handler) handleSetBasicInfo(session *LegacySession, seq1, seq2 uint16, uin uint32, data []byte) error {
 	if session == nil {
 		return nil
@@ -1009,13 +1024,32 @@ func (h *V3Handler) handleSetBasicInfo(session *LegacySession, seq1, seq2 uint16
 
 	h.sendAck(session.Addr, seq1, seq2, uin)
 
-	h.logger.Debug("V3 set basic info", "uin", uin)
+	if len(data) < 6 {
+		return h.sendReplyOK(session, seq2, 0x01E0)
+	}
 
-	// Send OK response
-	return h.sendReplyOK(session, seq2, 0x01E0) // ICQ_CMDxSND_USERxSET_BASIC_INFO_OK
+	r := bytes.NewReader(data[4:]) // skip timestamp
+	nick, _ := ParseLegacyString(r, true)
+	first, _ := ParseLegacyString(r, true)
+	last, _ := ParseLegacyString(r, true)
+	email, _ := ParseLegacyString(r, true)
+
+	ctx := context.Background()
+	info := state.ICQBasicInfo{
+		Nickname:     nick,
+		FirstName:    first,
+		LastName:     last,
+		EmailAddress: email,
+	}
+	if err := h.service.UpdateBasicInfo(ctx, uin, info); err != nil {
+		h.logger.Error("V3 set basic info failed", "uin", uin, "err", err)
+	}
+
+	return h.sendReplyOK(session, seq2, 0x01E0)
 }
 
 // handleSetHomeInfo processes set home info (0x0582)
+// Format: TIMESTAMP(4) + ADDR_LEN(2)+ADDR + CITY_LEN(2)+CITY + STATE_LEN(2)+STATE + COUNTRY(2) + PHONE_LEN(2)+PHONE + FAX_LEN(2)+FAX + CELL_LEN(2)+CELL + ZIP(4) + GMT(2) + AUTH(1) + WEBAWARE(1) + HIDEIP(1) + PUBLISH_EMAIL(1)
 func (h *V3Handler) handleSetHomeInfo(session *LegacySession, seq1, seq2 uint16, uin uint32, data []byte) error {
 	if session == nil {
 		return nil
@@ -1023,13 +1057,53 @@ func (h *V3Handler) handleSetHomeInfo(session *LegacySession, seq1, seq2 uint16,
 
 	h.sendAck(session.Addr, seq1, seq2, uin)
 
-	h.logger.Debug("V3 set home info", "uin", uin)
+	if len(data) < 6 {
+		return h.sendReplyOK(session, seq2, 0x0280)
+	}
 
-	// Send OK response
-	return h.sendReplyOK(session, seq2, 0x0280) // ICQ_CMDxSND_USERxSET_HOME_INFO_OK
+	r := bytes.NewReader(data[4:]) // skip timestamp
+	address, _ := ParseLegacyString(r, true)
+	city, _ := ParseLegacyString(r, true)
+	st, _ := ParseLegacyString(r, true)
+	var country uint16
+	binary.Read(r, binary.LittleEndian, &country)
+	phone, _ := ParseLegacyString(r, true)
+	fax, _ := ParseLegacyString(r, true)
+	cell, _ := ParseLegacyString(r, true)
+	var zipCode uint32
+	binary.Read(r, binary.LittleEndian, &zipCode)
+	var gmt uint16
+	binary.Read(r, binary.LittleEndian, &gmt)
+	var auth, webaware uint8
+	binary.Read(r, binary.LittleEndian, &auth)
+	binary.Read(r, binary.LittleEndian, &webaware)
+
+	// Read existing basic info to avoid overwriting nick/first/last/email
+	ctx := context.Background()
+	existing, err := h.service.GetFullUserInfo(ctx, uin)
+	if err == nil && existing != nil {
+		existing.ICQBasicInfo.Address = address
+		existing.ICQBasicInfo.City = city
+		existing.ICQBasicInfo.State = st
+		existing.ICQBasicInfo.CountryCode = country
+		existing.ICQBasicInfo.Phone = phone
+		existing.ICQBasicInfo.Fax = fax
+		existing.ICQBasicInfo.CellPhone = cell
+		existing.ICQBasicInfo.ZIPCode = fmt.Sprintf("%d", zipCode)
+		existing.ICQBasicInfo.GMTOffset = uint8(gmt)
+		if err := h.service.UpdateBasicInfo(ctx, uin, existing.ICQBasicInfo); err != nil {
+			h.logger.Error("V3 set home info failed", "uin", uin, "err", err)
+		}
+	}
+	if err := h.service.SetAuthMode(ctx, uin, auth == 1); err != nil {
+		h.logger.Error("V3 set home auth failed", "uin", uin, "err", err)
+	}
+
+	return h.sendReplyOK(session, seq2, 0x0280)
 }
 
 // handleSetHomeWeb processes set home web (0x058C)
+// Format: TIMESTAMP(4) + AGE(2) + SEX(1) + HP_LEN(2)+HP + BIRTH_YEAR(2) + BIRTH_MONTH(1) + BIRTH_DAY(1) + LANG1(1) + LANG2(1) + LANG3(1)
 func (h *V3Handler) handleSetHomeWeb(session *LegacySession, seq1, seq2 uint16, uin uint32, data []byte) error {
 	if session == nil {
 		return nil
@@ -1037,13 +1111,45 @@ func (h *V3Handler) handleSetHomeWeb(session *LegacySession, seq1, seq2 uint16, 
 
 	h.sendAck(session.Addr, seq1, seq2, uin)
 
-	h.logger.Debug("V3 set home web", "uin", uin)
+	if len(data) < 7 {
+		return h.sendReplyOK(session, seq2, 0x0294)
+	}
 
-	// Send OK response
-	return h.sendReplyOK(session, seq2, 0x0294) // ICQ_CMDxSND_USERxSET_HOME_PAGE_OK
+	r := bytes.NewReader(data[4:]) // skip timestamp
+	var age uint16
+	binary.Read(r, binary.LittleEndian, &age)
+	var sex uint8
+	binary.Read(r, binary.LittleEndian, &sex)
+	hp, _ := ParseLegacyString(r, true)
+	var birthYear uint16
+	binary.Read(r, binary.LittleEndian, &birthYear)
+	var birthMonth, birthDay, lang1, lang2, lang3 uint8
+	binary.Read(r, binary.LittleEndian, &birthMonth)
+	binary.Read(r, binary.LittleEndian, &birthDay)
+	binary.Read(r, binary.LittleEndian, &lang1)
+	binary.Read(r, binary.LittleEndian, &lang2)
+	binary.Read(r, binary.LittleEndian, &lang3)
+
+	ctx := context.Background()
+	info := state.ICQMoreInfo{
+		Gender:       uint16(sex),
+		HomePageAddr: hp,
+		BirthYear:    birthYear,
+		BirthMonth:   birthMonth,
+		BirthDay:     birthDay,
+		Lang1:        lang1,
+		Lang2:        lang2,
+		Lang3:        lang3,
+	}
+	if err := h.service.UpdateMoreInfo(ctx, uin, info); err != nil {
+		h.logger.Error("V3 set home web failed", "uin", uin, "err", err)
+	}
+
+	return h.sendReplyOK(session, seq2, 0x0294)
 }
 
 // handleSetWorkInfo processes set work info (0x0578)
+// Format: TIMESTAMP(4) + ADDR_LEN(2)+ADDR + CITY_LEN(2)+CITY + STATE_LEN(2)+STATE + COUNTRY(2) + COMPANY_LEN(2)+COMPANY + TITLE_LEN(2)+TITLE + DEPT(2) + PHONE_LEN(2)+PHONE + FAX_LEN(2)+FAX + PAGER_LEN(2)+PAGER + ZIP(4)
 func (h *V3Handler) handleSetWorkInfo(session *LegacySession, seq1, seq2 uint16, uin uint32, data []byte) error {
 	if session == nil {
 		return nil
@@ -1051,13 +1157,50 @@ func (h *V3Handler) handleSetWorkInfo(session *LegacySession, seq1, seq2 uint16,
 
 	h.sendAck(session.Addr, seq1, seq2, uin)
 
-	h.logger.Debug("V3 set work info", "uin", uin)
+	if len(data) < 6 {
+		return h.sendReplyOK(session, seq2, 0x026C)
+	}
 
-	// Send OK response
-	return h.sendReplyOK(session, seq2, 0x026C) // ICQ_CMDxSND_USERxSET_WORK_INFO_OK
+	r := bytes.NewReader(data[4:]) // skip timestamp
+	address, _ := ParseLegacyString(r, true)
+	city, _ := ParseLegacyString(r, true)
+	st, _ := ParseLegacyString(r, true)
+	var country uint16
+	binary.Read(r, binary.LittleEndian, &country)
+	company, _ := ParseLegacyString(r, true)
+	position, _ := ParseLegacyString(r, true)
+	var dept uint16
+	binary.Read(r, binary.LittleEndian, &dept)
+	phone, _ := ParseLegacyString(r, true)
+	fax, _ := ParseLegacyString(r, true)
+	// pager field — not stored in ICQWorkInfo, skip
+	ParseLegacyString(r, true)
+	var zipCode uint32
+	binary.Read(r, binary.LittleEndian, &zipCode)
+
+	// Read existing work info to preserve WebPage (set separately via 0x05BE)
+	ctx := context.Background()
+	existing, existErr := h.service.GetFullUserInfo(ctx, uin)
+	if existErr == nil && existing != nil {
+		existing.ICQWorkInfo.Address = address
+		existing.ICQWorkInfo.City = city
+		existing.ICQWorkInfo.State = st
+		existing.ICQWorkInfo.CountryCode = country
+		existing.ICQWorkInfo.Company = company
+		existing.ICQWorkInfo.Position = position
+		existing.ICQWorkInfo.Phone = phone
+		existing.ICQWorkInfo.Fax = fax
+		existing.ICQWorkInfo.ZIPCode = fmt.Sprintf("%d", zipCode)
+		if err := h.service.UpdateWorkInfo(ctx, uin, existing.ICQWorkInfo); err != nil {
+			h.logger.Error("V3 set work info failed", "uin", uin, "err", err)
+		}
+	}
+
+	return h.sendReplyOK(session, seq2, 0x026C)
 }
 
 // handleSetWorkWeb processes set work web (0x05BE)
+// Format: TIMESTAMP(4) + WEB_LEN(2)+WEB
 func (h *V3Handler) handleSetWorkWeb(session *LegacySession, seq1, seq2 uint16, uin uint32, data []byte) error {
 	if session == nil {
 		return nil
@@ -1065,10 +1208,24 @@ func (h *V3Handler) handleSetWorkWeb(session *LegacySession, seq1, seq2 uint16, 
 
 	h.sendAck(session.Addr, seq1, seq2, uin)
 
-	h.logger.Debug("V3 set work web", "uin", uin)
+	if len(data) < 6 {
+		return h.sendReplyOK(session, seq2, 0x0258)
+	}
 
-	// Send OK response
-	return h.sendReplyOK(session, seq2, 0x0258) // ICQ_CMDxSND_USERxSET_WORK_PAGE_OK
+	r := bytes.NewReader(data[4:]) // skip timestamp
+	web, _ := ParseLegacyString(r, true)
+
+	// Read existing work info to avoid overwriting other fields
+	ctx := context.Background()
+	existing, err := h.service.GetFullUserInfo(ctx, uin)
+	if err == nil && existing != nil {
+		existing.ICQWorkInfo.WebPage = web
+		if err := h.service.UpdateWorkInfo(ctx, uin, existing.ICQWorkInfo); err != nil {
+			h.logger.Error("V3 set work web failed", "uin", uin, "err", err)
+		}
+	}
+
+	return h.sendReplyOK(session, seq2, 0x0258)
 }
 
 // handleVisibleList processes visible list (0x06AE)

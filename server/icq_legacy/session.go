@@ -11,6 +11,7 @@ import (
 
 	"github.com/mk6i/open-oscar-server/config"
 	"github.com/mk6i/open-oscar-server/state"
+	"github.com/mk6i/open-oscar-server/wire"
 )
 
 // LegacySessionManager manages sessions for legacy ICQ clients
@@ -80,6 +81,11 @@ func (m *LegacySessionManager) CreateSession(uin uint32, addr *net.UDPAddr, vers
 	// the message pump. The legacy login handshake is simpler than OSCAR's
 	// multi-step signon, so we can mark it complete immediately.
 	instance.SetSignonComplete()
+
+	// Set ICQ user flags so that BuddyArrived SNACs generated from this
+	// session's TLVUserInfo() include the ICQ flag and DC info TLV that
+	// ICQ 2003b requires to display the user as online.
+	instance.SetUserInfoFlag(wire.OServiceUserFlagICQ | wire.OServiceUserFlagOSCARFree)
 
 	session := &LegacySession{
 		UIN:          uin,
