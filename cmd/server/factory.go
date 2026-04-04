@@ -264,6 +264,7 @@ func OSCAR(deps Container) *oscar.Server {
 		deps.sqLiteUserStore,
 		deps.sqLiteUserStore,
 		deps.inMemorySessionManager,
+		deps.sqLiteUserStore,
 	)
 	permitDenyService := foodgroup.NewPermitDenyService(
 		deps.sqLiteUserStore,
@@ -487,6 +488,7 @@ func TOC(deps Container) *toc.Server {
 				deps.sqLiteUserStore,
 				deps.sqLiteUserStore,
 				deps.inMemorySessionManager,
+				deps.sqLiteUserStore,
 			),
 			SNACRateLimits:    deps.snacRateLimits,
 			HTTPIPRateLimiter: toc.NewIPRateLimiter(rate.Every(1*time.Minute), 10, 1*time.Minute),

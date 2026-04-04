@@ -144,6 +144,10 @@ func (b *LegacyMessageBridge) handleOSCARMessage(session *LegacySession, msg wir
 		b.handleBuddyDeparted(session, msg)
 	case msg.Frame.FoodGroup == wire.ICBM && msg.Frame.SubGroup == wire.ICBMChannelMsgToClient:
 		b.handleICBMMessage(session, msg)
+	case msg.Frame.FoodGroup == wire.Feedbag && msg.Frame.SubGroup == wire.FeedbagRequestAuthorizeToClient:
+		b.handleAuthRequest(session, msg)
+	case msg.Frame.FoodGroup == wire.Feedbag && msg.Frame.SubGroup == wire.FeedbagRespondAuthorizeToClient:
+		b.handleAuthResponse(session, msg)
 	default:
 		// Silently ignore other SNAC types - legacy clients don't need them.
 		// This includes typing notifications, rate limit updates, etc.
@@ -235,6 +239,105 @@ func (b *LegacyMessageBridge) handleBuddyDeparted(session *LegacySession, msg wi
 	}
 }
 
+// buildLegacyAuthFields looks up a user's profile and returns FE-delimited
+// fields (nick, first, last, email) truncated to legacy ICQ limits.
+func (b *LegacyMessageBridge) buildLegacyAuthFields(uin uint32) (nick, firstName, lastName, email string) {
+	nick = fmt.Sprintf("%d", uin)
+	if user, err := b.userFinder.FindByUIN(context.Background(), uin); err == nil {
+		if user.ICQBasicInfo.Nickname != "" {
+			nick = user.ICQBasicInfo.Nickname
+		}
+		firstName = user.ICQBasicInfo.FirstName
+		lastName = user.ICQBasicInfo.LastName
+		email = user.ICQBasicInfo.EmailAddress
+	}
+	if len(nick) > 20 {
+		nick = nick[:20]
+	}
+	if len(firstName) > 30 {
+		firstName = firstName[:30]
+	}
+	if len(lastName) > 30 {
+		lastName = lastName[:30]
+	}
+	if len(email) > 50 {
+		email = email[:50]
+	}
+	return
+}
+
+// handleAuthRequest converts an OSCAR FeedbagRequestAuthorizeToClient (0x13,0x19)
+// into a legacy ICQ auth request message (type 0x06).
+func (b *LegacyMessageBridge) handleAuthRequest(session *LegacySession, msg wire.SNACMessage) {
+	body, ok := msg.Body.(wire.SNAC_0x13_0x18_FeedbagRequestAuthorizationToHost)
+	if !ok {
+		return
+	}
+
+	fromUIN, ok := parseUIN(body.ScreenName)
+	if !ok {
+		return
+	}
+
+	nick, first, last, email := b.buildLegacyAuthFields(fromUIN)
+	reason := utf8ToLatin1(body.Reason)
+	text := fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE1\xFE%s", nick, first, last, email, reason)
+
+	b.logger.Debug("OSCAR->legacy auth request",
+		"to_uin", session.UIN,
+		"from_uin", fromUIN,
+	)
+
+	if err := b.dispatcher.SendOnlineMessage(session, fromUIN, ICQLegacyMsgAuthReq, text); err != nil {
+		b.logger.Debug("failed to deliver auth request to legacy client",
+			"to_uin", session.UIN,
+			"from_uin", fromUIN,
+			"err", err,
+		)
+	}
+}
+
+// handleAuthResponse converts an OSCAR FeedbagRespondAuthorizeToClient (0x13,0x1B)
+// into a legacy ICQ auth grant (0x08) or deny (0x07) message.
+func (b *LegacyMessageBridge) handleAuthResponse(session *LegacySession, msg wire.SNACMessage) {
+	body, ok := msg.Body.(wire.SNAC_0x13_0x1B_FeedbagRespondAuthorizeToClient)
+	if !ok {
+		return
+	}
+
+	fromUIN, ok := parseUIN(body.ScreenName)
+	if !ok {
+		return
+	}
+
+	nick, first, last, email := b.buildLegacyAuthFields(fromUIN)
+
+	var msgType uint16
+	var text string
+	if body.Accepted == 1 {
+		msgType = ICQLegacyMsgAuthGrant
+		text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE", nick, first, last, email)
+	} else {
+		msgType = ICQLegacyMsgAuthDeny
+		reason := utf8ToLatin1(body.Reason)
+		text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE%s", nick, first, last, email, reason)
+	}
+
+	b.logger.Debug("OSCAR->legacy auth response",
+		"to_uin", session.UIN,
+		"from_uin", fromUIN,
+		"accepted", body.Accepted,
+	)
+
+	if err := b.dispatcher.SendOnlineMessage(session, fromUIN, msgType, text); err != nil {
+		b.logger.Debug("failed to deliver auth response to legacy client",
+			"to_uin", session.UIN,
+			"from_uin", fromUIN,
+			"err", err,
+		)
+	}
+}
+
 // handleICBMMessage converts an OSCAR ICBM channel message into a legacy
 // online message. This handles the case where the OSCAR relay system delivers
 // a message to a legacy session's SNAC queue (e.g., from another OSCAR user
@@ -293,44 +396,17 @@ func (b *LegacyMessageBridge) handleICBMMessage(session *LegacySession, msg wire
 				// nick\xFEfirst\xFElast\xFEemail\xFEauth\xFEreason
 				switch msgType {
 				case ICQLegacyMsgAuthReq, ICQLegacyMsgAuthDeny, ICQLegacyMsgAuthGrant, ICQLegacyMsgAdded:
-					// Look up sender's profile for the FE fields
-					nick := fmt.Sprintf("%d", fromUIN)
-					firstName := ""
-					lastName := ""
-					email := ""
-					if user, err := b.userFinder.FindByUIN(context.Background(), fromUIN); err == nil {
-						if user.ICQBasicInfo.Nickname != "" {
-							nick = user.ICQBasicInfo.Nickname
-						}
-						firstName = user.ICQBasicInfo.FirstName
-						lastName = user.ICQBasicInfo.LastName
-						email = user.ICQBasicInfo.EmailAddress
-					}
-
-					// Truncate fields to legacy ICQ limits
-					if len(nick) > 20 {
-						nick = nick[:20]
-					}
-					if len(firstName) > 30 {
-						firstName = firstName[:30]
-					}
-					if len(lastName) > 30 {
-						lastName = lastName[:30]
-					}
-					if len(email) > 50 {
-						email = email[:50]
-					}
-
+					nick, first, last, email := b.buildLegacyAuthFields(fromUIN)
 					reason := ch4Msg.Message
 					switch msgType {
 					case ICQLegacyMsgAuthReq:
-						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE1\xFE%s", nick, firstName, lastName, email, reason)
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE1\xFE%s", nick, first, last, email, reason)
 					case ICQLegacyMsgAuthDeny:
-						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE%s", nick, firstName, lastName, email, reason)
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE%s", nick, first, last, email, reason)
 					case ICQLegacyMsgAuthGrant:
-						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE", nick, firstName, lastName, email)
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE", nick, first, last, email)
 					case ICQLegacyMsgAdded:
-						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE0", nick, firstName, lastName, email)
+						text = fmt.Sprintf("%s\xFE%s\xFE%s\xFE%s\xFE0", nick, first, last, email)
 					}
 				}
 			}

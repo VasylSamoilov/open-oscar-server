@@ -656,34 +656,89 @@ func (s *ICQLegacyService) sendToOSCARClient(ctx context.Context, from, to state
 		return nil
 	}
 
-	// Auth messages (request/grant/deny) and "you were added" use ICBM Channel 4
-	// with ICBMCh4Message format — same as OSCAR's FeedbagRespondAuthorizeToHost
+	// Auth grant/deny: send as ICBM Channel 4 (same as RespondAuthorizeToHost).
+	// ICQ 2003b handles auth responses on Channel 4 correctly — it shows the
+	// message and updates the pending flag. Sending as FeedbagRespondAuthorizeToClient
+	// (0x13,0x1B) causes the client to remove the pending flag on deny, preventing
+	// re-request authorization.
 	switch msgType {
-	case ICQLegacyMsgAuthReq, ICQLegacyMsgAuthDeny, ICQLegacyMsgAuthGrant, ICQLegacyMsgAdded:
+	case ICQLegacyMsgAuthGrant, ICQLegacyMsgAuthDeny:
 		fromUIN, _ := strconv.ParseUint(from.String(), 10, 32)
-		// Legacy auth messages are FE-delimited: nick\xFEfirst\xFElast\xFEemail\xFEauth_flag\xFEreason
-		// Parse out the reason text — OSCAR ICBMCh4Message.Message contains only the reason.
-		// The OSCAR client gets nick/email from the sender's profile, not from the message body.
+		reasonText := strings.TrimRight(message, "\x00")
+
+		var senderInfo wire.TLVUserInfo
+		if s.legacySessionManager != nil {
+			session := s.legacySessionManager.GetSession(uint32(fromUIN))
+			if session != nil && session.Instance != nil {
+				senderInfo = session.Instance.Session().TLVUserInfo()
+			}
+		}
+		if senderInfo.ScreenName == "" {
+			senderInfo = wire.TLVUserInfo{ScreenName: from.String()}
+		}
+
+		ch4Msg := wire.ICBMCh4Message{
+			UIN:         uint32(fromUIN),
+			MessageType: uint8(msgType),
+			Message:     reasonText,
+		}
+		s.messageRelayer.RelayToScreenName(ctx, to, wire.SNACMessage{
+			Frame: wire.SNACFrame{
+				FoodGroup: wire.ICBM,
+				SubGroup:  wire.ICBMChannelMsgToClient,
+				RequestID: wire.ReqIDFromServer,
+			},
+			Body: wire.SNAC_0x04_0x07_ICBMChannelMsgToClient{
+				Cookie:      generateMessageCookie(),
+				ChannelID:   wire.ICBMChannelICQ,
+				TLVUserInfo: senderInfo,
+				TLVRestBlock: wire.TLVRestBlock{
+					TLVList: wire.TLVList{
+						wire.NewTLVLE(wire.ICBMTLVData, ch4Msg),
+						wire.NewTLVBE(wire.ICBMTLVStore, []byte{}),
+					},
+				},
+			},
+		})
+		// For auth grant, also send FeedbagRespondAuthorizeToClient so the
+		// OSCAR client removes the pending flag from the feedbag item.
+		// For deny, only ICBM is sent — this preserves the pending flag so
+		// the user can re-request authorization.
+		if msgType == ICQLegacyMsgAuthGrant {
+			s.messageRelayer.RelayToScreenName(ctx, to, wire.SNACMessage{
+				Frame: wire.SNACFrame{
+					FoodGroup: wire.Feedbag,
+					SubGroup:  wire.FeedbagRespondAuthorizeToClient,
+				},
+				Body: wire.SNAC_0x13_0x1B_FeedbagRespondAuthorizeToClient{
+					ScreenName: from.String(),
+					Accepted:   1,
+				},
+			})
+		}
+		return nil
+
+	case ICQLegacyMsgAuthReq:
+		// Send as FeedbagRequestAuthorizeToClient so OSCAR client shows auth dialog
 		reasonText := ""
 		parts := strings.Split(message, "\xFE")
-		switch msgType {
-		case ICQLegacyMsgAuthReq:
-			// Format: nick\xFEfirst\xFElast\xFEemail\xFEauth_flag\xFEreason
-			if len(parts) >= 6 {
-				reasonText = parts[5]
-			}
-		case ICQLegacyMsgAuthDeny:
-			// Format: nick\xFEfirst\xFElast\xFEemail\xFEreason
-			if len(parts) >= 5 {
-				reasonText = parts[4]
-			}
-		case ICQLegacyMsgAuthGrant:
-			// Format: nick\xFEfirst\xFElast\xFEemail\xFE (no reason)
-			reasonText = ""
-		case ICQLegacyMsgAdded:
-			// Format: nick\xFEfirst\xFElast\xFEemail\xFEauth_flag
-			reasonText = ""
+		if len(parts) >= 6 {
+			reasonText = parts[5]
 		}
+		s.messageRelayer.RelayToScreenName(ctx, to, wire.SNACMessage{
+			Frame: wire.SNACFrame{
+				FoodGroup: wire.Feedbag,
+				SubGroup:  wire.FeedbagRequestAuthorizeToClient,
+			},
+			Body: wire.SNAC_0x13_0x18_FeedbagRequestAuthorizationToHost{
+				ScreenName: from.String(),
+				Reason:     reasonText,
+			},
+		})
+		return nil
+
+	case ICQLegacyMsgAdded:
+		fromUIN, _ := strconv.ParseUint(from.String(), 10, 32)
 
 		// Populate TLVUserInfo from the sender's OSCAR session if available,
 		// otherwise build a minimal one with ICQ flags
@@ -701,7 +756,7 @@ func (s *ICQLegacyService) sendToOSCARClient(ctx context.Context, from, to state
 		ch4Msg := wire.ICBMCh4Message{
 			UIN:         uint32(fromUIN),
 			MessageType: uint8(msgType),
-			Message:     reasonText,
+			Message:     "",
 		}
 		s.messageRelayer.RelayToScreenName(ctx, to, wire.SNACMessage{
 			Frame: wire.SNACFrame{
