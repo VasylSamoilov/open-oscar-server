@@ -266,7 +266,6 @@ func (s buddyNotifier) BroadcastVisibility(
 	yourTLVInfo := you.Session().TLVUserInfo()
 
 	for _, relationship := range relationships {
-
 		if relationship.BlocksYou {
 			continue // they block you, don't send them notifications
 		}
